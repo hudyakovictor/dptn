@@ -1,0 +1,12 @@
+{
+  "/Users/victorkhudyakov/dutin/newapp/backend/metrics/metric_catalog_full.csv": {
+    "before": 1937,
+    "after": 1933,
+    "removed": 0
+  },
+  "/Users/victorkhudyakov/dutin/newapp/backend/metrics/metric_catalog_active.csv": {
+    "before": 1937,
+    "after": 1933,
+    "removed": 0
+  }
+}

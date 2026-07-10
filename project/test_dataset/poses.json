@@ -1,0 +1,114 @@
+[
+  {
+    "photo_id": "silicone_2010_09_01.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2010_09_01.jpg",
+    "bucket": "right_threequarter_mid",
+    "yaw": 31.706811904907227,
+    "pitch": -8.872515678405762,
+    "roll": 6.818378448486328
+  },
+  {
+    "photo_id": "silicone_2012_08_28.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2012_08_28.jpg",
+    "bucket": "right_profile",
+    "yaw": 87.44743347167969,
+    "pitch": -34.47705841064453,
+    "roll": 45.6634635925293
+  },
+  {
+    "photo_id": "silicone_2015_05_08.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2015_05_08.jpg",
+    "bucket": "left_threequarter_light",
+    "yaw": -12.321749687194824,
+    "pitch": 12.97600269317627,
+    "roll": -0.24138613045215607
+  },
+  {
+    "photo_id": "silicone_2017_08_20(2).png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2017_08_20(2).jpg",
+    "bucket": "frontal",
+    "yaw": -4.90342903137207,
+    "pitch": -14.257421493530273,
+    "roll": -1.5806210041046143
+  },
+  {
+    "photo_id": "silicone_2018_06_20.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2018_06_20.jpg",
+    "bucket": "right_profile",
+    "yaw": 79.28414916992188,
+    "pitch": -105.69731140136719,
+    "roll": -127.7214584350586
+  },
+  {
+    "photo_id": "silicone_2018_07_29.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2018_07_29.jpg",
+    "bucket": "right_profile",
+    "yaw": 83.98773193359375,
+    "pitch": -49.60985565185547,
+    "roll": -65.7113037109375
+  },
+  {
+    "photo_id": "silicone_2019_01_06.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2019_01_06.jpg",
+    "bucket": "left_threequarter_mid",
+    "yaw": -31.644500732421875,
+    "pitch": -8.14469051361084,
+    "roll": -3.3170366287231445
+  },
+  {
+    "photo_id": "silicone_2017_10_21.png",
+    "source": "/Volumes/SDCARD/test_photos/udmurt/2017_10_21.jpg",
+    "bucket": "left_threequarter_light",
+    "yaw": -14.74642562866211,
+    "pitch": 12.842360496520996,
+    "roll": 0.3272016942501068
+  },
+  {
+    "photo_id": "silicone_2024_03_28.png",
+    "source": "/Volumes/SDCARD/test_photos/vas/2024_03_28.jpg",
+    "bucket": "right_profile",
+    "yaw": 74.7306137084961,
+    "pitch": -47.13039779663086,
+    "roll": 51.23518753051758
+  },
+  {
+    "photo_id": "silicone_2025_05_08.png",
+    "source": "/Volumes/SDCARD/test_photos/vas/2025_05_08.jpg",
+    "bucket": "frontal",
+    "yaw": -5.483750343322754,
+    "pitch": -9.859760284423828,
+    "roll": -1.0384008884429932
+  },
+  {
+    "photo_id": "real_calibration_y-6p3r0.png",
+    "source": "calibration/real_calibration_y-6p3r0.png",
+    "bucket": "frontal",
+    "yaw": -6.0,
+    "pitch": 3.0,
+    "roll": 0.0
+  },
+  {
+    "photo_id": "real_calibration_y40p6r11.png",
+    "source": "calibration/real_calibration_y40p6r11.png",
+    "bucket": "right_threequarter_light",
+    "yaw": 40.0,
+    "pitch": 6.0,
+    "roll": 11.0
+  },
+  {
+    "photo_id": "real_calibration_y-73p29r29.png",
+    "source": "calibration/real_calibration_y-73p29r29.png",
+    "bucket": "left_threequarter_light",
+    "yaw": -73.0,
+    "pitch": 29.0,
+    "roll": 29.0
+  },
+  {
+    "photo_id": "real_calibration_y-77p-11r-15.png",
+    "source": "calibration/real_calibration_y-77p-11r-15.png",
+    "bucket": "left_threequarter_light",
+    "yaw": -77.0,
+    "pitch": -11.0,
+    "roll": -15.0
+  }
+]

@@ -1,0 +1,45 @@
+"""Общие утилиты и схемы DEEPUTIN."""
+
+from .logging import setup_logger
+from .schemas import (
+    CalibrationReference,
+    ForensicVerdict,
+    GeometryMetric,
+    MetricsRecord,
+    PairEvidence,
+    PipelineDataset,
+    PoseBucket,
+    PoseEstimate,
+    QualityMetrics,
+    ReportBundle,
+    Stage1Record,
+    Stage2Record,
+    Stage3Record,
+    Stage4Record,
+    Stage5Record,
+    Stage6Record,
+    Hypothesis,
+    VerdictLabel,
+)
+
+__all__ = [
+    "setup_logger",
+    "CalibrationReference",
+    "ForensicVerdict",
+    "GeometryMetric",
+    "MetricsRecord",
+    "PairEvidence",
+    "PipelineDataset",
+    "PoseBucket",
+    "PoseEstimate",
+    "QualityMetrics",
+    "ReportBundle",
+    "Stage1Record",
+    "Stage2Record",
+    "Stage3Record",
+    "Stage4Record",
+    "Stage5Record",
+    "Stage6Record",
+    "Hypothesis",
+    "VerdictLabel",
+]

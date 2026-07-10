@@ -1,0 +1,13 @@
+paths:
+  main_input: /Volumes/SDCARD/photo/all
+  calibration_input: /Volumes/SDCARD/photo/calibration
+  main_output: /Volumes/SDCARD/storage/main
+  calibration_output: /Volumes/SDCARD/storage/calibration
+
+stages:
+  - s1
+  - s2
+  - s3
+  - s4
+  - s5
+  - s6
