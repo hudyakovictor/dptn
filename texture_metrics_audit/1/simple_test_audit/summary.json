@@ -1,0 +1,75 @@
+{
+  "n_images": 296,
+  "group_counts": {
+    "early_reference": 196,
+    "late_hypothesis": 100
+  },
+  "years": {
+    "early_reference": [
+      1998,
+      2005
+    ],
+    "late_hypothesis": [
+      2024,
+      2026
+    ]
+  },
+  "simulations": 864,
+  "simulation_regimes": 72,
+  "material_inference_valid": false,
+  "material_inference_reason": "folder labels are perfectly confounded with time/acquisition",
+  "quality_review_percentiles": {
+    "q_valid_patches": {
+      "p5": 26.0,
+      "p10": 27.0,
+      "p25": 31.0,
+      "p50": 35.0,
+      "p75": 41.25,
+      "p90": 45.0,
+      "p95": 47.0
+    },
+    "q_laplacian_var": {
+      "p5": 15.16684717498487,
+      "p10": 20.504399183242334,
+      "p25": 42.53839220637234,
+      "p50": 73.95332808615713,
+      "p75": 179.82324584808413,
+      "p90": 279.51134430274817,
+      "p95": 358.87681873834714
+    },
+    "q_tenengrad": {
+      "p5": 304.59955978393555,
+      "p10": 403.91932678222656,
+      "p25": 610.8016586303711,
+      "p50": 853.4698638916016,
+      "p75": 1197.2061767578125,
+      "p90": 1509.857666015625,
+      "p95": 1841.9567260742188
+    },
+    "q_noise_sigma": {
+      "p5": 0.9067816883325577,
+      "p10": 1.084779441356659,
+      "p25": 1.5803592801094055,
+      "p50": 2.08678936958313,
+      "p75": 3.026498556137085,
+      "p90": 3.6598331332206726,
+      "p95": 4.059179455041885
+    },
+    "q_jpeg_blockiness": {
+      "p5": 0.0,
+      "p10": 0.0,
+      "p25": 0.0,
+      "p50": 0.0,
+      "p75": 0.004473401645665304,
+      "p90": 0.011564904018003112,
+      "p95": 0.015566549883039139
+    }
+  },
+  "apparent_folder_label_model": {
+    "status": "not_run",
+    "reason": "fewer than three robust texture descriptors",
+    "features": [
+      "tex_local_std"
+    ]
+  }
+}

@@ -215,10 +215,21 @@ class AnchorBasedCompareEngine:
     
     def _load_stage2_records(self, root: Path) -> List:
         records = []
-        for path in sorted(root.glob("*/metrics.json")):
-            payload = load_json(path)
-            if payload:
-                records.append(payload)
+        for photo_dir in sorted(root.iterdir()):
+            if not photo_dir.is_dir():
+                continue
+            info = load_json(photo_dir / "info.json")
+            geo = load_json(photo_dir / "geometry_metrics.json")
+            tex = load_json(photo_dir / "texture_metrics.json")
+            if info and isinstance(geo, dict):
+                records.append({
+                    "photo_id": info.get("photo_id", photo_dir.name),
+                    "dataset": info.get("dataset", "main"),
+                    "bucket": info.get("pose", {}).get("bucket", "unknown"),
+                    "quality": info.get("quality", {}),
+                    "geometry": geo,
+                    "texture": tex or {},
+                })
         return records
     
     def _load_stage1_records(self, root: Path) -> Dict:

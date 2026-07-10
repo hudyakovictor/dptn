@@ -81,7 +81,7 @@ def zone_points(ctx, zone_name: str, *, space: str = "canon_bucket", visible_onl
     if verts is None:
         return np.zeros((0, 3), dtype=float)
     raw = ctx.macro_indices.get(zone_name, [])
-    if not raw:
+    if raw is None or len(raw) == 0:
         return np.zeros((0, 3), dtype=float)
     idx = np.asarray(list(raw), dtype=np.int64)
     idx = idx[(idx >= 0) & (idx < len(verts))]

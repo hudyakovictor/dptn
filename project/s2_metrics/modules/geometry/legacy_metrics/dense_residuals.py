@@ -19,7 +19,7 @@ def _region_indices(ctx, region: str) -> np.ndarray:
     if region == "global":
         return np.asarray(ctx.shared_idx, dtype=np.int64)
     raw = ctx.macro_indices.get(region, [])
-    if not raw:
+    if raw is None or len(raw) == 0:
         return np.array([], dtype=np.int64)
     shared = set(np.asarray(ctx.shared_idx, dtype=np.int64).tolist())
     return np.asarray([int(i) for i in raw if int(i) in shared and 0 <= int(i) < len(ctx.vertices_a_unit)], dtype=np.int64)

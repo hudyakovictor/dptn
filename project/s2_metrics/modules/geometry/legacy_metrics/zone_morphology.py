@@ -107,7 +107,7 @@ def compute(ctx, specs_):
                         if space == "raw"
                         else None
                     )
-                    if normals is not None and raw:
+                    if normals is not None and raw is not None and len(raw) > 0:
                         idx = np.asarray(list(raw), dtype=int)
                         idx = idx[(idx >= 0) & (idx < len(normals))]
                         if len(idx):

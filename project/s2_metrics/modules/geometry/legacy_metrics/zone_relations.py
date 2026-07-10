@@ -39,7 +39,7 @@ def _normal_mean(ctx, region: str, space: str) -> np.ndarray | None:
         else ctx.normals_raw
     )
     raw = ctx.macro_indices.get(region, [])
-    if normals is None or not raw:
+    if normals is None or raw is None or len(raw) == 0:
         return None
     idx = np.asarray(list(raw), dtype=int)
     idx = idx[(idx >= 0) & (idx < len(normals))]

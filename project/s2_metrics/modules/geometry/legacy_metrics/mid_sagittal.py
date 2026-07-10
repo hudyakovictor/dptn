@@ -13,7 +13,7 @@ BILATERAL_ZONE_PAIRS = (
 
 
 def _centroid(vertices: np.ndarray, indices) -> np.ndarray | None:
-    if not indices:
+    if indices is None or len(indices) == 0:
         return None
     idx = np.asarray(list(indices), dtype=np.int64)
     idx = idx[(idx >= 0) & (idx < len(vertices))]

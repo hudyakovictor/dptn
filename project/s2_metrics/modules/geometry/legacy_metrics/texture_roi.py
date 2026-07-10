@@ -30,7 +30,7 @@ def _bbox_roi(ctx, region: str):
     if ctx.image_rgb is None or getattr(ctx.recon, "vertices_image", None) is None: return None
     img=ctx.image_rgb; h,w=img.shape[:2]
     raw=ctx.macro_indices.get(region, [])
-    if not raw: return None
+    if raw is None or len(raw) == 0: return None
     idx=np.asarray(list(raw),dtype=int); vi=np.asarray(ctx.recon.vertices_image)
     idx=idx[(idx>=0)&(idx<len(vi))]
     if len(idx)<2: return None
@@ -50,7 +50,7 @@ def _poly_roi(ctx, region: str):
         return None
     img=ctx.image_rgb; h,w=img.shape[:2]
     raw=ctx.macro_indices.get(region, [])
-    if not raw: return None
+    if raw is None or len(raw) == 0: return None
     idx=np.asarray(list(raw),dtype=int); vi=np.asarray(ctx.recon.vertices_image)
     idx=idx[(idx>=0)&(idx<len(vi))]
     if len(idx)<3: return None

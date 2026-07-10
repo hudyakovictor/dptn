@@ -7,9 +7,78 @@ import numpy as np
 
 from .types import MetricContext
 
+_ATTR_KEY_MAP = {
+    "vertices_world": "vertices",
+    "vertices_canon": "vertices_canonical",
+    "normals_world": "normals",
+    "angles_deg": "pose",
+    "visibility": "seg_visible",
+}
+
+# Zone names matching 3DDFA-V3 annotation_groups order (same as geometry_extractor.py)
+ANNOTATION_ZONE_NAMES = (
+    "right_eye", "left_eye", "right_eyebrow", "left_eyebrow",
+    "nose", "upper_lip", "lower_lip", "skin"
+)
+
+# Derived macro zones from base annotation zones
+MACRO_ZONES = {
+    "forehead": ["skin"],
+    "brow_ridge_L": ["left_eyebrow"],
+    "brow_ridge_R": ["right_eyebrow"],
+    "orbit_L": ["left_eye"],
+    "orbit_R": ["right_eye"],
+    "nose_bridge_tip": ["nose"],
+    "nose_wing_L": ["skin"],
+    "nose_wing_R": ["skin"],
+    "cheekbone_L": ["skin"],
+    "cheekbone_R": ["skin"],
+    "chin": ["skin"],
+    "jaw_L": ["skin"],
+    "jaw_R": ["skin"],
+    "upper_lip": ["upper_lip"],
+    "lower_lip": ["lower_lip"],
+}
+
+
+def _build_macro_indices(annotation_groups: list, vertices: np.ndarray) -> dict[str, np.ndarray]:
+    """Build zone name -> vertex indices mapping from annotation_groups."""
+    macro = {}
+    # Base annotation zones
+    for i, zone_name in enumerate(ANNOTATION_ZONE_NAMES):
+        if i < len(annotation_groups):
+            idx = annotation_groups[i]
+            if idx is not None and len(idx) > 0:
+                macro[zone_name] = np.asarray(idx, dtype=np.int64)
+    
+    # Derived macro zones (union of base zones)
+    for macro_name, base_zones in MACRO_ZONES.items():
+        indices = []
+        for bz in base_zones:
+            if bz in macro:
+                indices.append(macro[bz])
+        if indices:
+            macro[macro_name] = np.concatenate(indices)
+    return macro
+
+
+def _get(reconstruction: Any, attr_name: str, default: Any = None) -> Any:
+    if isinstance(reconstruction, dict):
+        if attr_name == "payload":
+            return {
+                "id_params": reconstruction.get("id_params"),
+                "exp_params": reconstruction.get("exp_params"),
+            }
+        key = _ATTR_KEY_MAP.get(attr_name, attr_name)
+        val = reconstruction.get(key, default)
+        if attr_name == "angles_deg" and isinstance(val, dict):
+            return [val.get("pitch", 0), val.get("yaw", 0), val.get("roll", 0)]
+        return val
+    return getattr(reconstruction, attr_name, default)
+
 
 def _neutral_shape(adapter: Any, recon: Any) -> np.ndarray | None:
-    payload = getattr(recon, "payload", {}) or {}
+    payload = _get(recon, "payload", {}) or {}
     if "id_params" not in payload or not hasattr(adapter, "_model") or adapter._model is None:
         return None
     try:
@@ -79,17 +148,17 @@ def build_metric_context(
     texture_forensics: dict[str, Any] | None = None,
     texture_profile: dict[str, Any] | None = None,
 ) -> MetricContext:
-    angles = np.asarray(getattr(reconstruction, "angles_deg", np.zeros(3)), dtype=float).reshape(-1)
+    angles = np.asarray(_get(reconstruction, "angles_deg", np.zeros(3)), dtype=float).reshape(-1)
     pitch = float(angles[0]) if len(angles) > 0 else 0.0
     yaw = float(angles[1]) if len(angles) > 1 else 0.0
     roll = float(angles[2]) if len(angles) > 2 else 0.0
-    vertices_raw = np.asarray(reconstruction.vertices_world, dtype=float)
+    vertices_raw = np.asarray(_get(reconstruction, "vertices_world"), dtype=float)
     vertices_canon = vertices_raw.copy()
 
     vertices_shape_neutral = _neutral_shape(adapter, reconstruction) if adapter is not None else None
-    visibility_raw = getattr(reconstruction, "visibility", None)
+    visibility_raw = _get(reconstruction, "visibility", None)
 
-    payload = getattr(reconstruction, "payload", {}) or {}
+    payload = _get(reconstruction, "payload", {}) or {}
     id_arr_tmp = None if payload.get("id_params") is None else np.asarray(payload.get("id_params"), dtype=float)
     basis = _shape_basis(adapter, len(vertices_raw), None if id_arr_tmp is None else int(id_arr_tmp.size))
     image_rgb = None
@@ -101,8 +170,9 @@ def build_metric_context(
 
     from .topology_utils import recompute_vertex_normals
 
-    triangles = np.asarray(getattr(reconstruction, "triangles", np.zeros((0, 3))), dtype=np.int64)
-    normals_raw = getattr(reconstruction, "normals_world", None)
+    triangles = np.asarray(_get(reconstruction, "triangles", np.zeros((0, 3))), dtype=np.int64)
+    annotation_groups = list(_get(reconstruction, "annotation_groups", []) or [])
+    normals_raw = _get(reconstruction, "normals_world", None)
     normals_canon = (
         recompute_vertex_normals(vertices_canon, triangles)
         if vertices_canon is not None
@@ -113,6 +183,8 @@ def build_metric_context(
         if vertices_shape_neutral is not None
         else None
     )
+
+    macro_indices = _build_macro_indices(annotation_groups, vertices_canon)
 
     return MetricContext(
         photo_id=photo_id,
@@ -129,15 +201,15 @@ def build_metric_context(
         normals_canon=normals_canon,
         normals_shape_neutral=normals_shape_neutral,
         triangles=triangles,
-        annotation_groups=list(getattr(reconstruction, "annotation_groups", []) or []),
-        macro_indices={},
-        landmarks_106=getattr(reconstruction, "landmarks_106", None),
+        annotation_groups=annotation_groups,
+        macro_indices=macro_indices,
+        landmarks_106=_get(reconstruction, "landmarks_106", None),
         visibility_raw=visibility_raw,
         visibility_canon=visibility_raw,
         id_params=id_arr_tmp,
         exp_params=None if payload.get("exp_params") is None else np.asarray(payload.get("exp_params"), dtype=float),
         shape_basis=basis,
-        uv_coords=getattr(reconstruction, "uv_coords", None),
+        uv_coords=_get(reconstruction, "uv_coords", None),
         image_rgb=image_rgb,
         quality=quality or {},
         geometry_metrics=geometry_metrics or {},

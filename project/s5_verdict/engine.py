@@ -141,11 +141,22 @@ class VerdictEngine:
 
     def _load_stage2_records(self, root: Path) -> dict[str, Stage2Record]:
         records: dict[str, Stage2Record] = {}
-        for path in sorted(root.glob("*/metrics.json")):
-            payload = load_json(path)
-            if payload:
-                record = Stage2Record.model_validate(payload)
-                records[record.photo_id] = record
+        for photo_dir in sorted(root.iterdir()):
+            if not photo_dir.is_dir():
+                continue
+            info = load_json(photo_dir / "info.json")
+            geo = load_json(photo_dir / "geometry_metrics.json")
+            tex = load_json(photo_dir / "texture_metrics.json")
+            if info and isinstance(geo, dict):
+                rec = Stage2Record(
+                    photo_id=info.get("photo_id", photo_dir.name),
+                    dataset=info.get("dataset", "main"),
+                    bucket=info.get("pose", {}).get("bucket", "unknown"),
+                    quality=info.get("quality", {}),
+                    geometry=geo,
+                    texture=tex or {},
+                )
+                records[rec.photo_id] = rec
         return records
 
     def _load_stage3_records(self, root: Path) -> dict[str, Stage3Record]:

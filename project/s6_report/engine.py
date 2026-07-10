@@ -41,15 +41,22 @@ class ReportEngine:
         for photo_dir in root.iterdir():
             if not photo_dir.is_dir():
                 continue
-            metrics_path = photo_dir / "metrics.json"
-            if metrics_path.exists():
-                payload = load_json(metrics_path)
-                if payload:
-                    try:
-                        from ..shared.schemas import Stage2Record
-                        stage2_records[payload.get("photo_id", photo_dir.name)] = Stage2Record.model_validate(payload)
-                    except Exception:
-                        pass
+            info = load_json(photo_dir / "info.json")
+            geo = load_json(photo_dir / "geometry_metrics.json")
+            tex = load_json(photo_dir / "texture_metrics.json")
+            if info and isinstance(geo, dict):
+                try:
+                    from ..shared.schemas import Stage2Record
+                    stage2_records[info.get("photo_id", photo_dir.name)] = Stage2Record(
+                        photo_id=info.get("photo_id", photo_dir.name),
+                        dataset=info.get("dataset", "main"),
+                        bucket=info.get("pose", {}).get("bucket", "unknown"),
+                        quality=info.get("quality", {}),
+                        geometry=geo,
+                        texture=tex or {},
+                    )
+                except Exception:
+                    pass
         personas = self._build_personas(timeline, verdicts, stage2_records=stage2_records or None)
         theses = self._generate_theses(stats, personas)
         

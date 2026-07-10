@@ -40,9 +40,10 @@ MODULE_NAMES = [
 
 
 def load_modules() -> list[ModuleType]:
+    pkg = __name__.rsplit(".", 1)[0]
     modules: list[ModuleType] = []
     for name in MODULE_NAMES:
-        modules.append(import_module(f"metrics.{name}"))
+        modules.append(import_module(f"{pkg}.{name}"))
     return modules
 
 

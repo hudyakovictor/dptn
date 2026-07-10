@@ -32,7 +32,7 @@ def _normal_stats(ctx, region: str, space: str):
         else None
     )
     raw = ctx.macro_indices.get(region, [])
-    if normals is None or not raw:
+    if normals is None or raw is None or len(raw) == 0:
         return {}
     idx = np.asarray(list(raw), dtype=int)
     idx = idx[(idx >= 0) & (idx < len(normals))]

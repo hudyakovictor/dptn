@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
+import csv
+import json
+
 import cv2
 import numpy as np
 from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
@@ -17,6 +20,29 @@ from .modules.texture_extractor import TextureExtractor
 from .texture_anomaly import CohortTextureAnomalyDetector
 from .physical_features import PhysicalTextureExtractor
 
+
+def load_old_csv_bucket_metrics(bucket: str) -> set[str]:
+    """Load exact metric names from old CSV for a specific bucket."""
+    old_root = Path("/Users/victorkhudyakov/dutin/newapp/test_personas")
+    metrics = set()
+    for path in old_root.rglob("metrics.csv"):
+        summary_path = path.with_name("summary.json")
+        if not summary_path.exists():
+            continue
+        try:
+            s = json.loads(summary_path.read_text(encoding="utf-8"))
+            b = s.get("pose", {}).get("bucket", "unknown")
+            if b == bucket:
+                with open(path, encoding="utf-8-sig", newline="") as f:
+                    for r in csv.DictReader(f):
+                        n = r.get("metric_name", "").strip()
+                        if n and n != "nan":
+                            metrics.add(n)
+        except Exception:
+            continue
+    return metrics
+
+
 logger = setup_logger("deeputin.s2")
 
 
@@ -26,14 +52,17 @@ class MetricsEngine:
         self.dataset = dataset
         self.config = config or {}
         root = Path(__file__).resolve().parents[2]
+        # Use the actual evidence tables from old backend
         geometry_table = self.config.get(
             "geometry_evidence_table",
-            root / "imgtest" / "futureplan" / "stage3_geomety_info" / "assets" / "METRIC_EVIDENCE_TABLE.csv",
+            Path("/Users/victorkhudyakov/dutin/newapp/imgtest/metrics_test/METRIC_EVIDENCE_TABLE.csv"),
         )
         texture_leaderboard = self.config.get(
             "texture_leaderboard",
-            root / "imgtest" / "unified_test" / "clean_feature_leaderboard.csv",
+            Path("/Users/victorkhudyakov/dutin/newapp/imgtest/unified_test/clean_feature_leaderboard.csv"),
         )
+        if not texture_leaderboard.exists():
+            texture_leaderboard = root / "imgtest" / "unified_test" / "clean_feature_leaderboard.csv"
         self.geometry_resolver = GeometryIdentityResolver(geometry_table)
         self.texture_classifier = TextureSkinClassifier(texture_leaderboard)
         self.geometry_catalog = load_geometry_metric_catalog()
@@ -49,7 +78,6 @@ class MetricsEngine:
             logger.warning("Нет stage1 записей для этапа 2 в %s", self.output_dir)
             return []
 
-        # Pass 1: extract all metrics and group by cohort for anomaly detection
         raw_records: list[tuple[Stage1Record, Stage2Record]] = []
         cohort_groups: dict[str, list[dict]] = {}
         for index, record in enumerate(stage1_records, start=1):
@@ -65,7 +93,6 @@ class MetricsEngine:
             except Exception as exc:
                 logger.exception("[s2] Ошибка на %s: %s", record.photo_id, exc)
 
-        # Fit cohort baselines
         for cohort_key, cohort_textures in cohort_groups.items():
             if len(cohort_textures) >= 3:
                 try:
@@ -74,7 +101,6 @@ class MetricsEngine:
                 except Exception as exc:
                     logger.warning("[s2] Cohort '%s' fit failed: %s", cohort_key, exc)
 
-        # Pass 2: score each photo against its cohort and finalize
         records: list[Stage2Record] = []
         for stage1_record, stage2_record in raw_records:
             year = stage1_record.date.year if stage1_record.date else 2000
@@ -111,10 +137,34 @@ class MetricsEngine:
         reconstruction = load_pickle(photo_dir / "reconstruction.pkl")
         rgba = load_rgba_png(photo_dir / "face_mask.png")
 
-        # Extract geometry from real 3DDFA-V3 reconstruction
         geometry = self.geometry_extractor.extract(reconstruction)
 
-        # TextureExtractor: извлекаем все метрики с face_mask_path для alpha-маски
+        try:
+            from .modules.geometry.legacy_metrics.context import build_metric_context
+            from .modules.geometry.legacy_metrics.runner import compute_single_photo_metrics
+
+            legacy_ctx = build_metric_context(
+                photo_id=record.photo_id,
+                image_path=photo_dir / "face_crop.jpg",
+                reconstruction=reconstruction,
+                adapter=None,
+                pose_bucket=info.pose.bucket.value,
+                quality=info.quality.model_dump() if info.quality else {},
+                geometry_metrics=geometry,
+            )
+            legacy_values, legacy_errors = compute_single_photo_metrics(legacy_ctx)
+            for mv in legacy_values:
+                if mv.value is not None and isinstance(mv.value, (int, float)):
+                    geometry[mv.spec.name] = float(mv.value)
+        except Exception as exc:
+            logger.warning(f"Legacy metrics computation failed: {exc}")
+
+        bucket_name = info.pose.bucket.value
+        allowed_geo = load_old_csv_bucket_metrics(bucket_name)
+        if allowed_geo:
+            geometry = {k: v for k, v in geometry.items() if k in allowed_geo}
+            logger.info(f"Filtered geometry for bucket {bucket_name}: {len(geometry)}/{len(allowed_geo)} metrics kept")
+
         class TextureCtx:
             image_rgb = rgba[:, :, :3]
             face_bbox = info.face_bbox
@@ -126,7 +176,6 @@ class MetricsEngine:
         geometry_hint = self.geometry_resolver.resolve(geometry)
         texture_hint = self.texture_classifier.classify(texture, info.quality)
 
-        # Extract physical texture features (SSS, specular, pores, etc.)
         physical_features = {}
         try:
             landmarks_68 = reconstruction.get("landmarks_68")
@@ -152,7 +201,6 @@ class MetricsEngine:
         except Exception:
             pass
 
-        # Добавляем флаг фильтрации
         texture_weights_json = texture.pop("texture_feature_weights_json", None)
         metric_notes = {
             "geometry_space": "3ddfa_v3_canonical",
@@ -193,20 +241,6 @@ class MetricsEngine:
                 "quality_sensitive_excluded": self.texture_extractor._quality_sensitive_excluded,
             },
         )
-        save_json(stage2.model_dump(), photo_dir / "metrics.json")
-        save_json(
-            {
-                "photo_id": info.photo_id,
-                "geometry_hint": geometry_hint,
-                "texture_hint": texture_hint,
-                "selected_metric_keys": selected_keys,
-                "quality_sensitive_excluded": self.texture_extractor._quality_sensitive_excluded,
-            },
-            photo_dir / "stage2_hints.json",
-        )
+        save_json(stage2.geometry, photo_dir / "geometry_metrics.json")
+        save_json(stage2.texture, photo_dir / "texture_metrics.json")
         return stage2
-
-    def _filter_geometry_metrics(self, geometry: dict[str, float]) -> dict[str, float]:
-        if not self.geometry_metric_whitelist:
-            return geometry
-        return {key: value for key, value in geometry.items() if key in self.geometry_metric_whitelist}

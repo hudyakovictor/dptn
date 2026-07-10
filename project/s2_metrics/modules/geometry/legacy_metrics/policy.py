@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from core.policy import POSE_YAW_BILATERAL_OFF_DEG
+POSE_YAW_BILATERAL_OFF_DEG = 45.0
 
 from .common import ALL_BUCKETS
 from .types import MetricContext, MetricSpec, MetricValue

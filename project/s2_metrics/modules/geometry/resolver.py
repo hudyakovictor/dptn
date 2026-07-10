@@ -92,7 +92,9 @@ class GeometryIdentityResolver:
                 center, spread = self._parse_range(row.get(f"{face}_диапазон"))
                 if center is None:
                     continue
-                weight = abs(float(row.get(f"{face}_effect", row.get("max_effect", 1.0)) or 1.0))
+                weight = abs(float(row.get(f"{face}_effect", row.get("max_effect", 1.0))))
+                if weight != weight:  # NaN check
+                    weight = 1.0
                 rules.append(
                     GeometryRule(
                         bucket="all",
