@@ -1,8 +1,8 @@
 paths:
-  main_input: /Volumes/SDCARD/photo/all
-  calibration_input: /Volumes/SDCARD/photo/calibration
-  main_output: /Volumes/SDCARD/storage/main
-  calibration_output: /Volumes/SDCARD/storage/calibration
+  main_input: ${DPTN_DATA_ROOT:-data}/photo/all
+  calibration_input: ${DPTN_DATA_ROOT:-data}/photo/calibration
+  main_output: ${DPTN_DATA_ROOT:-data}/storage/main
+  calibration_output: ${DPTN_DATA_ROOT:-data}/storage/calibration
 
 stages:
   - s1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -29,10 +30,13 @@ else:
 
 logger = setup_logger("deeputin")
 
-DEFAULT_MAIN_INPUT = Path("/Volumes/SDCARD/photo/all")
-DEFAULT_CALIBRATION_INPUT = Path("/Volumes/SDCARD/photo/calibration")
-DEFAULT_MAIN_OUTPUT = Path("/Volumes/SDCARD/storage/main")
-DEFAULT_CALIBRATION_OUTPUT = Path("/Volumes/SDCARD/storage/calibration")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = Path(os.environ.get("DPTN_DATA_ROOT", PROJECT_ROOT / "data"))
+
+DEFAULT_MAIN_INPUT = DATA_ROOT / "photo" / "all"
+DEFAULT_CALIBRATION_INPUT = DATA_ROOT / "photo" / "calibration"
+DEFAULT_MAIN_OUTPUT = DATA_ROOT / "storage" / "main"
+DEFAULT_CALIBRATION_OUTPUT = DATA_ROOT / "storage" / "calibration"
 DEFAULT_STAGES = ("s1", "s2", "s3", "s4", "s5", "s6")
 
 
