@@ -200,7 +200,7 @@ class TextureExtractorV2:
             result["noise_level"] = noise_level
             result["jpeg_blockiness"] = blockiness
             result["overall_quality"] = overall
-            result["texture_noise_sigma"] = 0.0  # будет заполнено в tier1
+            result["texture_noise_sigma"] = noise_level  # use MAD as texture noise estimate
 
         except Exception:
             pass
@@ -277,17 +277,19 @@ class TextureExtractorV2:
                 self._last_assessability = "eligible"
 
             # Quality assessment (аудитор #1 percentiles)
+            # Use native crop for quality metrics, not preview
             lapl = quality.get("q_laplacian_var", quality.get("sharpness_score", 0))
-            tenengrad = quality.get("q_tenengrad", lapl * 10)
+            # Compute tenengrad on native q_crop (CLAHE-enhanced)
+            native_tenengrad = self._compute_tenengrad(q_crop, mask_crop)
             noise = quality.get("q_noise_sigma", quality.get("noise_level", 0))
             block = quality.get("q_jpeg_blockiness", quality.get("jpeg_blockiness", 0))
 
-            # p10 lapl 20.5, tenengrad 403, p90 noise 3.66, block 0.01156
+            # p10 lapl 20.5, native_tenengrad ~40-50 for good quality, p90 noise 3.66, block 0.01156
             if self._valid_patches < MIN_VALID_PATCHES:
                 self._last_assessability = "not_assessable"
-            elif (lapl < 20.5 and tenengrad < 403) or (noise > 3.66 and block > 0.01156):
+            elif (lapl < 20.5 and native_tenengrad < 40) or (noise > 3.66 and block > 0.01156):
                 self._last_assessability = "not_assessable"
-            elif (lapl < 20.5 or tenengrad < 403) or (noise > 3.66 or block > 0.01156):
+            elif (lapl < 20.5 or native_tenengrad < 40) or (noise > 3.66 or block > 0.01156):
                 self._last_assessability = "low_confidence"
             else:
                 self._last_assessability = "eligible"

@@ -90,24 +90,27 @@ class CohortTextureAnomalyDetectorV2:
         self.cohort_baselines: Dict[str, CohortBaseline] = {}
 
     def get_cohort_key(self, year: int, overall_quality: float) -> str:
-        """Возвращает ключ когорты: era_qclass (e.g., early_scan_low)."""
-        era = "vas_era"
+        """Возвращает ключ когорты: era (e.g., early_scan). 
+        Используем только эпоху для получения достаточного n_samples в когорте."""
         for start, end, key in self.COHORT_ERAS:
             if start <= year < end:
-                era = key
-                break
-        if overall_quality < 0.4:
-            qclass = "low"
-        elif overall_quality < 0.65:
-            qclass = "mid"
-        else:
-            qclass = "high"
-        return f"{era}_{qclass}"
+                return key
+        return "vas_era"
 
     def fit_cohort(self, cohort_records: List[Dict], cohort_key: str) -> CohortBaseline:
         """Строит baseline для когорты."""
         X = self._extract_features(cohort_records)
         X_scaled = self.scaler.fit_transform(X)
+
+        n_samples, n_features = X.shape
+        
+        # Dynamic n_neighbors: min(2, n_samples-1) for small cohorts, 20 for larger
+        n_neighbors = min(20, max(2, n_samples - 1))
+        
+        # Use euclidean metric for small cohorts (Mahalanobis needs n_samples > n_features)
+        metric = "mahalanobis" if n_samples > n_features else "euclidean"
+        
+        self.lof.set_params(n_neighbors=n_neighbors, metric=metric)
         self.lof.fit(X_scaled)
 
         baseline = CohortBaseline(

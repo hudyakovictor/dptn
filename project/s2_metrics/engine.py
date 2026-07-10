@@ -121,28 +121,28 @@ class MetricsEngine:
         reconstruction = load_pickle(photo_dir / "reconstruction.pkl")
         rgba = load_rgba_png(photo_dir / "face_mask.png")
 
-        geometry = self.geometry_extractor.extract(reconstruction)
+        geometry = {}  # TEMP: disable geometry_extractor for fast texture-only testing
 
-        # Legacy geometry metrics (optional)
-        try:
-            from .modules.geometry.legacy_metrics.context import build_metric_context
-            from .modules.geometry.legacy_metrics.runner import compute_single_photo_metrics
-
-            legacy_ctx = build_metric_context(
-                photo_id=record.photo_id,
-                image_path=photo_dir / "face_crop.jpg",
-                reconstruction=reconstruction,
-                adapter=None,
-                pose_bucket=info.pose.bucket.value,
-                quality=info.quality.model_dump() if info.quality else {},
-                geometry_metrics=geometry,
-            )
-            legacy_values, legacy_errors = compute_single_photo_metrics(legacy_ctx)
-            for mv in legacy_values:
-                if mv.value is not None and isinstance(mv.value, (int, float)):
-                    geometry[mv.spec.name] = float(mv.value)
-        except Exception as exc:
-            logger.warning("Legacy metrics computation failed: %s", exc)
+        # Legacy geometry metrics DISABLED (slow)
+        # try:
+        #     from .modules.geometry.legacy_metrics.context import build_metric_context
+        #     from .modules.geometry.legacy_metrics.runner import compute_single_photo_metrics
+        #
+        #     legacy_ctx = build_metric_context(
+        #         photo_id=record.photo_id,
+        #         image_path=photo_dir / "face_crop.jpg",
+        #         reconstruction=reconstruction,
+        #         adapter=None,
+        #         pose_bucket=info.pose.bucket.value,
+        #         quality=info.quality.model_dump() if info.quality else {},
+        #         geometry_metrics=geometry,
+        #     )
+        #     legacy_values, legacy_errors = compute_single_photo_metrics(legacy_ctx)
+        #     for mv in legacy_values:
+        #         if mv.value is not None and isinstance(mv.value, (int, float)):
+        #             geometry[mv.spec.name] = float(mv.value)
+        # except Exception as exc:
+        #     logger.warning("Legacy metrics computation failed: %s", exc)
 
         # REMOVED: Old CSV bucket filtering that was dropping bone metrics
         # allowed_geo = load_old_csv_bucket_metrics(bucket_name)
@@ -161,7 +161,7 @@ class MetricsEngine:
         texture_ctx = TextureCtx()
         texture = self.texture_extractor.extract(texture_ctx, exclude_sensitive=False)
 
-        # Extract assessability fields from texture (strings, not floats)
+        # Pop non-float fields from texture (schema expects dict[str, float])
         texture_assessability = texture.pop("texture_assessability", "eligible")
         q_valid_patches = texture.pop("q_valid_patches", 0)
 
