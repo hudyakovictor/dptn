@@ -1,0 +1,54 @@
+{
+  "age_years": 48.47,
+  "dataset": "main",
+  "date": "2001-03-29",
+  "expression_flags": {
+    "jaw_excluded": false,
+    "neutralized": false,
+    "smile_excluded": false
+  },
+  "face_bbox": [
+    11,
+    5,
+    195,
+    170
+  ],
+  "face_mask_path": "/Users/victorkhudyakov/deeputin/data/storage/main/2001_03_29/face_mask.png",
+  "image_size": [
+    800,
+    800
+  ],
+  "photo_id": "2001_03_29",
+  "pose": {
+    "age_years": 48.47,
+    "bucket": "frontal",
+    "confidence": 0.8,
+    "date": "2001-03-29",
+    "photo_id": "2001_03_29",
+    "pitch": 11.835987091064453,
+    "pose_source": "3ddfa_v3",
+    "roll": -0.10352006554603577,
+    "yaw": -0.04917149618268013
+  },
+  "quality": {
+    "blur_value": 382.2159449370996,
+    "face_min_dim": 0,
+    "is_jpeg_blocky": true,
+    "is_motion_blurred": false,
+    "is_over_smoothed": false,
+    "jpeg_blockiness": 1.7813612461090087,
+    "noise_level": 2.5296170711517334,
+    "overall_quality": 0.5458687294175262,
+    "ppIOD": 0.0,
+    "q_laplacian_var": 0.0,
+    "q_tenengrad": 0.0,
+    "q_valid_patches": 0,
+    "sharpness_score": 0.3822159449370996
+  },
+  "readiness": {
+    "geometry": "available",
+    "texture": "available"
+  },
+  "reconstruction_path": "/Users/victorkhudyakov/deeputin/data/storage/main/2001_03_29/reconstruction.pkl",
+  "source_path": "/Users/victorkhudyakov/deeputin/data/photo/all/2001_03_29.jpg"
+}

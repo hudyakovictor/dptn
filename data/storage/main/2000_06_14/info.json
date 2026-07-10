@@ -32,12 +32,17 @@
   },
   "quality": {
     "blur_value": 238.9431684677734,
+    "face_min_dim": 0,
     "is_jpeg_blocky": true,
     "is_motion_blurred": false,
     "is_over_smoothed": false,
     "jpeg_blockiness": 1.6518637657165527,
     "noise_level": 1.9496749639511108,
     "overall_quality": 0.45054871823643183,
+    "ppIOD": 0.0,
+    "q_laplacian_var": 0.0,
+    "q_tenengrad": 0.0,
+    "q_valid_patches": 0,
     "sharpness_score": 0.23894316846777341
   },
   "readiness": {

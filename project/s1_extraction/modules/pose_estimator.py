@@ -37,10 +37,10 @@ def expand_bbox(x_min, y_min, x_max, y_max, factor=0.2):
     width = x_max - x_min
     height = y_max - y_min
 
-    x_min_new = x_min - int(factor * height)
-    y_min_new = y_min - int(factor * width)
-    x_max_new = x_max + int(factor * height)
-    y_max_new = y_max + int(factor * width)
+    x_min_new = x_min - int(factor * width)
+    y_min_new = y_min - int(factor * height)
+    x_max_new = x_max + int(factor * width)
+    y_max_new = y_max + int(factor * height)
 
     return max(0, x_min_new), max(0, y_min_new), x_max_new, y_max_new
 

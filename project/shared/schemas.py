@@ -48,6 +48,12 @@ class QualityMetrics(BaseModel):
     is_motion_blurred: bool = False
     is_jpeg_blocky: bool = False
     is_over_smoothed: bool = False
+    # V2 extended quality metrics
+    q_laplacian_var: float = 0.0
+    q_tenengrad: float = 0.0
+    q_valid_patches: int = 0
+    ppIOD: float = 0.0
+    face_min_dim: int = 0
 
 
 class PoseEstimate(BaseModel):
