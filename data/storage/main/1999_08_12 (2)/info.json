@@ -1,0 +1,49 @@
+{
+  "age_years": 46.85,
+  "dataset": "main",
+  "date": "1999-08-12",
+  "expression_flags": {
+    "jaw_excluded": false,
+    "neutralized": false,
+    "smile_excluded": false
+  },
+  "face_bbox": [
+    10,
+    3,
+    185,
+    178
+  ],
+  "face_mask_path": "/Users/victorkhudyakov/deeputin/data/storage/main/1999_08_12 (2)/face_mask.png",
+  "image_size": [
+    1080,
+    1080
+  ],
+  "photo_id": "1999_08_12 (2)",
+  "pose": {
+    "age_years": 46.85,
+    "bucket": "right_threequarter_light",
+    "confidence": 0.8,
+    "date": "1999-08-12",
+    "photo_id": "1999_08_12 (2)",
+    "pitch": 10.133130073547363,
+    "pose_source": "3ddfa_v3",
+    "roll": -4.935665130615234,
+    "yaw": 13.105293273925781
+  },
+  "quality": {
+    "blur_value": 551.3542728016375,
+    "is_jpeg_blocky": true,
+    "is_motion_blurred": false,
+    "is_over_smoothed": false,
+    "jpeg_blockiness": 1.9162051200866699,
+    "noise_level": 3.987577199935913,
+    "overall_quality": 0.6517687578188385,
+    "sharpness_score": 0.5513542728016375
+  },
+  "readiness": {
+    "geometry": "available",
+    "texture": "available"
+  },
+  "reconstruction_path": "/Users/victorkhudyakov/deeputin/data/storage/main/1999_08_12 (2)/reconstruction.pkl",
+  "source_path": "/Users/victorkhudyakov/deeputin/data/photo/all/1999_08_12 (2).jpg"
+}

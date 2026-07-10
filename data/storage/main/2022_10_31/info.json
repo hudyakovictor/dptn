@@ -1,0 +1,49 @@
+{
+  "age_years": 70.07,
+  "dataset": "main",
+  "date": "2022-10-31",
+  "expression_flags": {
+    "jaw_excluded": false,
+    "neutralized": false,
+    "smile_excluded": false
+  },
+  "face_bbox": [
+    41,
+    1,
+    197,
+    179
+  ],
+  "face_mask_path": "/Users/victorkhudyakov/deeputin/data/storage/main/2022_10_31/face_mask.png",
+  "image_size": [
+    800,
+    800
+  ],
+  "photo_id": "2022_10_31",
+  "pose": {
+    "age_years": 70.07,
+    "bucket": "left_threequarter_light",
+    "confidence": 0.8,
+    "date": "2022-10-31",
+    "photo_id": "2022_10_31",
+    "pitch": 12.012389183044434,
+    "pose_source": "3ddfa_v3",
+    "roll": -6.369967460632324,
+    "yaw": -30.95648193359375
+  },
+  "quality": {
+    "blur_value": 42.67026791163086,
+    "is_jpeg_blocky": true,
+    "is_motion_blurred": false,
+    "is_over_smoothed": false,
+    "jpeg_blockiness": 1.486403751373291,
+    "noise_level": 0.6004718542098999,
+    "overall_quality": 0.3247222859306282,
+    "sharpness_score": 0.04267026791163086
+  },
+  "readiness": {
+    "geometry": "available",
+    "texture": "available"
+  },
+  "reconstruction_path": "/Users/victorkhudyakov/deeputin/data/storage/main/2022_10_31/reconstruction.pkl",
+  "source_path": "/Users/victorkhudyakov/deeputin/data/photo/all/2022_10_31.jpg"
+}

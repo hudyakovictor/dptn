@@ -1,6 +1,6 @@
 {
   "autocorr_decay_len": 20.0,
-  "bimodality_ashman_D": 2.8967721008893195,
+  "bimodality_ashman_D": 2.8967721008893212,
   "dwt_haar_HH_LL_ratio": 0.0,
   "edge_tortuosity_mean": 0.9831187274166384,
   "fft_high_low_ratio": 0.12475705627401669,
@@ -30,7 +30,7 @@
   "specular_elongation": 1.0,
   "specular_sharpness": 0.0,
   "sss_index": 0.07917160438084163,
-  "texture_noise_sigma": 0.0,
+  "texture_noise_sigma": 2.9326226711273193,
   "texture_unreliable": 0.0,
   "tv_residual_sparsity": 0.8408500552177429,
   "wld_joint_entropy": 6.141213016254442
