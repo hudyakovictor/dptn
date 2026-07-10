@@ -293,7 +293,7 @@ class TextureExtractorV2:
                 self._last_assessability = "eligible"
 
             bbox = (y0, y1, x0, x1)
-            return skin_mask, bbox, rgb_crop, gray_crop, q_crop
+            return mask_crop, bbox, rgb_crop, gray_crop, q_crop
 
         except Exception:
             return None, None, None, None, None
@@ -495,7 +495,8 @@ class TextureExtractorV2:
             mag_bins = np.linspace(0, mag_masked.max(), 17)
             orient_bins = np.linspace(-np.pi, np.pi, 17)
 
-            hist, _, _ = np.histogram2d(mag_masked, orient_masked, bins=[mag_bins, orient_bins], density=True)
+            hist, _, _ = np.histogram2d(mag_masked, orient_masked, bins=[mag_bins, orient_bins], density=False)
+            hist = hist / (hist.sum() + 1e-9)
             hist = hist[hist > 0]
             return float(-np.sum(hist * np.log2(hist)))
         except Exception:
@@ -590,14 +591,16 @@ class TextureExtractorV2:
             return 0.0
 
     def _tier1_pore_density_r2_mpx(self, gray: np.ndarray, mask: np.ndarray) -> float:
-        """Pore density: white_tophat disk2, thr=mean+std, count>thr / (skin_px/1e6)."""
+        """Pore density: white_tophat disk2, thr=mean+std, count BLOBS / (skin_px/1e6)."""
         try:
             th = white_tophat(gray.astype(np.uint8), disk(2))
             th_masked = th[mask > 0]
             if th_masked.size == 0:
                 return 0.0
             thr = th_masked.mean() + th_masked.std()
-            count = np.sum(th_masked > thr)
+            binary = (th > thr) & (mask > 0)
+            labeled = measure.label(binary)
+            count = len(np.unique(labeled)) - 1  # exclude background 0
             skin_px = mask.sum()
             return float(count / max(skin_px / 1e6, 1e-6))
         except Exception:
@@ -805,27 +808,36 @@ class TextureExtractorV2:
             return 0.0
 
     def _tier2_shannon_entropy_q32(self, gray: np.ndarray, mask: np.ndarray) -> float:
-        """Shannon entropy q32 — самая устойчивая метрика."""
+        """Shannon entropy q32 — самая устойчивая метрика. Percentile quantization."""
         try:
             skin = gray[mask > 0]
             if skin.size == 0:
                 return 0.0
-            hist, _ = np.histogram(skin, bins=32, range=(0, 255), density=True)
+            # Percentile quantization like GLCM
+            lo, hi = np.percentile(skin.astype(float), [2, 98])
+            span = max(hi - lo, 1e-6)
+            norm = np.clip((gray.astype(float) - lo) / span, 0.0, 1.0)
+            quant = (norm * 31).astype(np.uint8)
+            quant_masked = quant[mask > 0]
+            hist, _ = np.histogram(quant_masked, bins=32, range=(0, 31), density=True)
             hist = hist[hist > 0]
             return float(-np.sum(hist * np.log2(hist)))
         except Exception:
             return 0.0
 
     def _tier2_gabor_f08_anisotropy(self, gray: np.ndarray, mask: np.ndarray) -> float:
-        """Gabor f=0.08 (1/0.08=12.5px wavelength) anisotropy across 4 angles."""
+        """Gabor f=0.08 (1/0.08=12.5px wavelength) anisotropy across 4 angles.
+        Anisotropy = std of mean responses across angles (higher = more directional)."""
         try:
-            anisotropies = []
+            means = []
             for theta in [0, np.pi/4, np.pi/2, 3*np.pi/4]:
                 real, _ = gabor(gray, frequency=0.08, theta=theta, n_stds=3)
                 real_masked = real[mask > 0]
                 if real_masked.size > 0:
-                    anisotropies.append(float(np.std(real_masked)))
-            return float(np.mean(anisotropies)) if anisotropies else 0.0
+                    means.append(float(np.mean(real_masked)))
+            if len(means) < 2:
+                return 0.0
+            return float(np.std(means))
         except Exception:
             return 0.0
 
@@ -848,15 +860,18 @@ class TextureExtractorV2:
             return 0.0
 
     def _tier2_specular_elongation(self, rgb: np.ndarray, mask: np.ndarray) -> float:
-        """Specular elongation: блики — high R=G=B, elongation = major/minor axis."""
+        """Specular elongation: блики — high R=G=B, elongation = major/minor axis.
+        Returns 1.0 when no specular (isotropic), >1 when elongated."""
         try:
+            if mask.sum() < 100:
+                return 1.0
             # Specular detection: high min(R,G,B) + low saturation
             R, G, B = rgb[:, :, 0].astype(float), rgb[:, :, 1].astype(float), rgb[:, :, 2].astype(float)
             min_rgb = np.minimum(np.minimum(R, G), B)
             sat = np.max([R, G, B], axis=0) - np.min([R, G, B], axis=0)
             spec_mask = (min_rgb > 200) & (sat < 30) & (mask > 0)
             if not spec_mask.any():
-                return 0.0
+                return 1.0  # No specular = isotropic
             labeled = measure.label(spec_mask)
             props = measure.regionprops(labeled)
             elongations = []
