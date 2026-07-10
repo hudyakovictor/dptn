@@ -15,37 +15,34 @@ import numpy as np
 import torch
 from PIL import Image
 
-try:
-    from core.utils import classify_pose_bucket
-except ImportError:
-    # Заглушка для совместимости
-    def classify_pose_bucket(yaw: float, pitch: float) -> str:
-        """Классифицирует bucket на основе углов поворота головы."""
-        if abs(yaw) < 15:
-            return "frontal"
-        elif yaw < -60:
-            return "left_profile"
-        elif yaw > 60:
-            return "right_profile"
-        elif yaw < -30:
-            return "left_threequarter_deep"
-        elif yaw > 30:
-            return "right_threequarter_deep"
-        elif yaw < -10:
-            return "left_threequarter_light"
-        elif yaw > 10:
-            return "right_threequarter_light"
-        else:
-            return "frontal"
+from deeputin.shared.utils import classify_pose_bucket
 
 from .types import ReconstructionResult
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-CORE_3DDFA_ROOT = Path("/Users/victorkhudyakov/dutin/core/3ddfa_v3")
+
+def get_3ddfa_root() -> Path:
+    """Resolve 3DDFA-V3 root path from env or relative to this file."""
+    env_path = os.environ.get("DUTIN_3DDFA_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+    # Fallback: relative to this file (project/core/3ddfa_v3)
+    return Path(__file__).resolve().parents[3] / "core" / "3ddfa_v3"
+
+
+CORE_3DDFA_ROOT = get_3ddfa_root()
+
 
 def log_progress(message: str) -> None:
     from datetime import datetime
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+# Add core paths for uv_module and other dependencies
+CORE_ROOT = Path(__file__).resolve().parents[3] / "core"
+if str(CORE_ROOT) not in sys.path:
+    sys.path.insert(0, str(CORE_ROOT))
 
 if str(CORE_3DDFA_ROOT) not in sys.path:
     sys.path.insert(0, str(CORE_3DDFA_ROOT))
@@ -55,16 +52,18 @@ try:
     from face_box import face_box  # type: ignore
     from model.recon import face_model  # type: ignore
     _HAS_3DDFA = True
-except ImportError:
+    _IMPORT_ERROR = None
+except ImportError as e:
     _HAS_3DDFA = False
+    _IMPORT_ERROR = e
     def resolve_detector_device(device: str) -> str:
         return device
     def resolve_torch_device(device: str) -> str:
         return device
     def face_box(*args, **kwargs):
-        raise RuntimeError("3DDFA_v3 not available")
+        raise RuntimeError(f"3DDFA_v3 not available: {_IMPORT_ERROR}")
     def face_model(*args, **kwargs):
-        raise RuntimeError("3DDFA_v3 not available")
+        raise RuntimeError(f"3DDFA_v3 not available: {_IMPORT_ERROR}")
 
 
 def compute_image_hash(image_path: Path | str) -> str:
@@ -262,20 +261,12 @@ class ReconstructionAdapter:
 
             exp_np = exp_tensor.detach().cpu().numpy()[0]
 
-            from pipeline.detect_pose import _canonical_yaw_deg
-
+            # 3DDFA-V3 returns angles as [pitch, yaw, roll] in radians
             raw_yaw = float(angles_deg[1])
-            _yaw = _canonical_yaw_deg(
-                raw_yaw,
-                sign_env_key="DUTIN_DDFA_YAW_SIGN",
-                default_sign="1",
-            )
             _pose_bucket = classify_pose_bucket(
-                _yaw,
+                raw_yaw,
                 float(angles_deg[0]),
                 float(angles_deg[2]),
-                raw_yaw_3ddfa_deg=raw_yaw,
-                pose_source="3ddfa_v3",
             )
 
             reconstruction = ReconstructionResult(

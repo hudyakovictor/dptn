@@ -1,0 +1,16 @@
+{
+  "dataset": "main",
+  "geometry_distance": 0.38705158402711226,
+  "identity_confidence": 0.870982805324296,
+  "identity_hint": "PUT",
+  "notes": [
+    "bucket=left_threequarter_light",
+    "identity_hint основан на расстоянии до calibration baseline",
+    "stage2_identity_hint=UNCERTAIN",
+    "stage2_skin_hint=unknown"
+  ],
+  "photo_id": "1999_07_01",
+  "skin_confidence": 0.99,
+  "skin_hint": "real",
+  "texture_suspicion": 0.2525021933120058
+}

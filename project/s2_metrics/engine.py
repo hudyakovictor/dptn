@@ -10,10 +10,12 @@ from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 from ..shared.logging import setup_logger
 from ..shared.schemas import PipelineDataset, Stage1Record, Stage2Record
 from ..shared.utils import ensure_dir, load_json, load_pickle, load_rgba_png, save_json
-from .modules import GEOMETRY_CORE_METRICS, GeometryIdentityResolver, TextureSkinClassifier, load_geometry_metric_catalog, load_texture_metric_catalog
-from .modules.geometry.aliases import project_geometry_aliases
+from .modules import GeometryIdentityResolver, TextureSkinClassifier, load_geometry_metric_catalog, load_texture_metric_catalog
+from .modules.geometry_extractor import GeometryExtractor
 from .modules.texture.aliases import project_texture_aliases
 from .modules.texture_extractor import TextureExtractor
+from .texture_anomaly import CohortTextureAnomalyDetector
+from .physical_features import PhysicalTextureExtractor
 
 logger = setup_logger("deeputin.s2")
 
@@ -36,8 +38,10 @@ class MetricsEngine:
         self.texture_classifier = TextureSkinClassifier(texture_leaderboard)
         self.geometry_catalog = load_geometry_metric_catalog()
         self.texture_catalog = load_texture_metric_catalog(texture_leaderboard)
-        self.geometry_metric_whitelist = set(GEOMETRY_CORE_METRICS)
         self.texture_extractor = TextureExtractor()
+        self.geometry_extractor = GeometryExtractor()
+        self.cohort_detector = CohortTextureAnomalyDetector()
+        self.physical_extractor = PhysicalTextureExtractor()
 
     def run(self) -> list[Stage2Record]:
         stage1_records = self._load_stage1_records()
@@ -45,14 +49,48 @@ class MetricsEngine:
             logger.warning("Нет stage1 записей для этапа 2 в %s", self.output_dir)
             return []
 
-        records: list[Stage2Record] = []
+        # Pass 1: extract all metrics and group by cohort for anomaly detection
+        raw_records: list[tuple[Stage1Record, Stage2Record]] = []
+        cohort_groups: dict[str, list[dict]] = {}
         for index, record in enumerate(stage1_records, start=1):
             try:
                 metrics = self._process_one(record)
-                records.append(metrics)
+                raw_records.append((record, metrics))
                 logger.info("[s2] %s/%s %s", index, len(stage1_records), record.photo_id)
+                year = record.date.year if record.date else 2000
+                cohort_key = self.cohort_detector.get_cohort_key(year)
+                if cohort_key not in cohort_groups:
+                    cohort_groups[cohort_key] = []
+                cohort_groups[cohort_key].append(metrics.texture)
             except Exception as exc:
                 logger.exception("[s2] Ошибка на %s: %s", record.photo_id, exc)
+
+        # Fit cohort baselines
+        for cohort_key, cohort_textures in cohort_groups.items():
+            if len(cohort_textures) >= 3:
+                try:
+                    self.cohort_detector.fit_cohort(cohort_textures, cohort_key)
+                    logger.info("[s2] Cohort '%s': fitted on %d samples", cohort_key, len(cohort_textures))
+                except Exception as exc:
+                    logger.warning("[s2] Cohort '%s' fit failed: %s", cohort_key, exc)
+
+        # Pass 2: score each photo against its cohort and finalize
+        records: list[Stage2Record] = []
+        for stage1_record, stage2_record in raw_records:
+            year = stage1_record.date.year if stage1_record.date else 2000
+            cohort_key = self.cohort_detector.get_cohort_key(year)
+            quality = float(stage1_record.quality.overall_quality) if stage1_record else 0.5
+            try:
+                anomaly_result = self.cohort_detector.score(stage2_record.texture, cohort_key, quality)
+                stage2_record.metric_notes["texture_anomaly_score"] = str(anomaly_result.anomaly_score)
+                stage2_record.metric_notes["texture_anomaly_interpretation"] = anomaly_result.interpretation
+                stage2_record.metric_notes["texture_anomaly_max_z"] = str(anomaly_result.max_z)
+                if anomaly_result.feature_flags:
+                    stage2_record.metric_notes["texture_anomaly_flags"] = ",".join(anomaly_result.feature_flags.keys())
+            except Exception:
+                stage2_record.metric_notes["texture_anomaly_score"] = "0.0"
+                stage2_record.metric_notes["texture_anomaly_interpretation"] = "computation_error"
+            records.append(stage2_record)
 
         save_json([r.model_dump() for r in records], self.output_dir / "stage2_manifest.json")
         return records
@@ -72,7 +110,9 @@ class MetricsEngine:
         info = Stage1Record.model_validate(load_json(info_path))
         reconstruction = load_pickle(photo_dir / "reconstruction.pkl")
         rgba = load_rgba_png(photo_dir / "face_mask.png")
-        geometry = self._geometry_metrics(info, reconstruction)
+
+        # Extract geometry from real 3DDFA-V3 reconstruction
+        geometry = self.geometry_extractor.extract(reconstruction)
 
         # TextureExtractor: извлекаем все метрики с face_mask_path для alpha-маски
         class TextureCtx:
@@ -82,15 +122,35 @@ class MetricsEngine:
         texture_ctx = TextureCtx()
         texture = self.texture_extractor.extract(texture_ctx, exclude_sensitive=False)
 
-        geometry.update(project_geometry_aliases(geometry, info))
-        geometry = self._filter_geometry_metrics(geometry)
         texture.update(project_texture_aliases(texture))
         geometry_hint = self.geometry_resolver.resolve(geometry)
         texture_hint = self.texture_classifier.classify(texture, info.quality)
 
+        # Extract physical texture features (SSS, specular, pores, etc.)
+        physical_features = {}
+        try:
+            landmarks_68 = reconstruction.get("landmarks_68")
+            if landmarks_68 is not None and rgba is not None:
+                landmarks = np.array(landmarks_68, dtype=np.float32)
+                if landmarks.ndim == 2 and landmarks.shape[1] >= 2:
+                    image_rgb = rgba[:, :, :3]
+                    seg_mask = rgba[:, :, 3] > 128 if rgba.shape[2] == 4 else np.ones(rgba.shape[:2], dtype=bool)
+                    pf = self.physical_extractor.extract(image_rgb, landmarks, seg_mask)
+                    physical_features = {
+                        "sss_index": pf.sss_index,
+                        "specular_sharpness": pf.specular_sharpness,
+                        "pore_periodicity": pf.pore_periodicity,
+                        "lbp_nonuniform_ratio": pf.lbp_nonuniform_ratio,
+                        "spectral_slope": pf.spectral_slope,
+                        "hemoglobin_index": pf.hemoglobin_index,
+                        "seam_score": pf.seam_score,
+                    }
+        except Exception:
+            pass
+
         # Добавляем флаг фильтрации
         metric_notes = {
-            "geometry_space": "placeholder_canon",
+            "geometry_space": "3ddfa_v3_canonical",
             "texture_source": "face_mask.png",
             "geometry_identity_hint": geometry_hint.get("identity_hint", "UNCERTAIN"),
             "texture_skin_hint": texture_hint.get("texture_skin_hint", "unknown"),
@@ -98,6 +158,8 @@ class MetricsEngine:
             "texture_catalog_size": str(len(self.texture_catalog)),
             "quality_sensitive_excluded": str(self.texture_extractor._quality_sensitive_excluded),
         }
+        for k, v in physical_features.items():
+            metric_notes[f"physical_{k}"] = str(v)
         if self.texture_extractor._quality_sensitive_excluded:
             metric_notes["quality_filter_reason"] = "low_quality_detected"
 
@@ -141,157 +203,3 @@ class MetricsEngine:
         if not self.geometry_metric_whitelist:
             return geometry
         return {key: value for key, value in geometry.items() if key in self.geometry_metric_whitelist}
-
-    def _geometry_metrics(self, info: Stage1Record, reconstruction: dict | None) -> dict[str, float]:
-        bbox = np.asarray(info.face_bbox, dtype=float)
-        if bbox.size != 4:
-            raise RuntimeError(f"Некорректный bbox для {info.photo_id}")
-        x, y, w, h = bbox.tolist()
-        rec = reconstruction or {}
-        landmarks = rec.get("landmarks", {})
-        def pt(name: str) -> np.ndarray:
-            return np.asarray(landmarks.get(name, [x + w / 2.0, y + h / 2.0]), dtype=float)
-        left_eye = pt("left_eye")
-        right_eye = pt("right_eye")
-        nose = pt("nose")
-        mouth_left = pt("mouth_left")
-        mouth_right = pt("mouth_right")
-        chin = pt("chin")
-        forehead = pt("forehead")
-        cheek_left = pt("cheek_left")
-        cheek_right = pt("cheek_right")
-        vertices = np.asarray(rec.get("vertices", []), dtype=float)
-        z_span = float(np.ptp(vertices[:, 2])) if vertices.size and vertices.shape[1] >= 3 else 0.0
-        mesh_width = float(np.ptp(vertices[:, 0])) if vertices.size and vertices.shape[1] >= 3 else float(w)
-        mesh_height = float(np.ptp(vertices[:, 1])) if vertices.size and vertices.shape[1] >= 3 else float(h)
-
-        face_width = float(np.linalg.norm(right_eye - left_eye))
-        face_height = float(np.linalg.norm(chin - forehead))
-        mouth_width = float(np.linalg.norm(mouth_right - mouth_left))
-        cheek_span = float(np.linalg.norm(cheek_right - cheek_left))
-        eye_to_mouth = float(np.linalg.norm(((left_eye + right_eye) / 2.0) - ((mouth_left + mouth_right) / 2.0)))
-        symmetry_proxy = 1.0 - min(1.0, abs((cheek_left[0] + cheek_right[0]) / 2.0 - (x + w / 2.0)) / max(w, 1.0))
-
-        return {
-            "face_width_px": face_width,
-            "face_height_px": face_height,
-            "face_aspect_ratio": float(face_width / max(face_height, 1e-6)),
-            "mesh_width_span": mesh_width,
-            "mesh_height_span": mesh_height,
-            "mesh_depth_span": z_span,
-            "cheekbone_span": cheek_span,
-            "orbit_span": face_width,
-            "jaw_span": mouth_width,
-            "nose_bridge_length": float(np.linalg.norm(forehead - nose)),
-            "chin_projection": float((chin[1] - nose[1]) / max(h, 1e-6)),
-            "eye_to_mouth_ratio": float(eye_to_mouth / max(face_height, 1e-6)),
-            "symmetry_proxy": float(np.clip(symmetry_proxy, 0.0, 1.0)),
-            "landmark_dispersion": float(np.std(np.array([left_eye, right_eye, nose, mouth_left, mouth_right, chin]), axis=0).mean()),
-            "mesh_vertex_count": float(len(vertices)) if vertices.size else 0.0,
-            "mesh_face_count": float(len(rec.get("faces", []))) if rec else 0.0,
-        }
-
-    def _texture_metrics(self, rgba: np.ndarray) -> dict[str, float]:
-        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-        rgb = rgba[:, :, :3].astype(np.float32)
-        mask = alpha > 0.1
-        if not np.any(mask):
-            mask = np.ones(alpha.shape, dtype=bool)
-        gray = cv2.cvtColor(rgba[:, :, :3], cv2.COLOR_RGB2GRAY)
-        pixels = gray[mask]
-        color_pixels = rgb[mask]
-        if pixels.size == 0:
-            pixels = gray.reshape(-1)
-            color_pixels = rgb.reshape(-1, 3)
-
-        gray_u8 = np.clip(gray, 0, 255).astype(np.uint8)
-        laplacian_var = float(cv2.Laplacian(gray_u8, cv2.CV_64F).var())
-        entropy = float(_entropy(gray_u8[mask]))
-        lbp = local_binary_pattern(gray_u8, P=8, R=1, method="uniform")
-        lbp_values = lbp[mask]
-        lbp_hist, _ = np.histogram(lbp_values, bins=int(lbp.max() + 1), density=True)
-        lbp_uniformity = float(np.sum(lbp_hist[:-1])) if lbp_hist.size > 1 else 0.0
-        glcm_features = _glcm_features(gray_u8, mask)
-        fft_features = _fft_features(gray_u8, mask)
-        edges = cv2.Canny(gray_u8, 40, 120)
-        edge_density = float(edges[mask].mean() / 255.0)
-        specular_ratio = float(np.mean((color_pixels.mean(axis=1) > 205) & (color_pixels.std(axis=1) < 28)))
-        saturation = float(np.mean(_rgb_to_saturation(color_pixels)))
-        return {
-            "texture_gray_mean": float(np.mean(pixels)),
-            "texture_gray_std": float(np.std(pixels)),
-            "texture_entropy": entropy,
-            "texture_laplacian_var": laplacian_var,
-            "texture_lbp_uniformity": lbp_uniformity,
-            "texture_fft_highfreq_ratio": fft_features["highfreq_ratio"],
-            "texture_fft_peak_ratio": fft_features["peak_ratio"],
-            "texture_glcm_contrast": glcm_features["contrast"],
-            "texture_glcm_homogeneity": glcm_features["homogeneity"],
-            "texture_glcm_energy": glcm_features["energy"],
-            "texture_edge_density": edge_density,
-            "texture_specular_ratio": specular_ratio,
-            "texture_saturation": saturation,
-            "texture_color_std": float(np.std(color_pixels)),
-        }
-
-
-def _entropy(values: np.ndarray) -> float:
-    if values.size == 0:
-        return 0.0
-    hist, _ = np.histogram(values, bins=32, range=(0, 255), density=True)
-    hist = hist[hist > 0]
-    if hist.size == 0:
-        return 0.0
-    return float(-np.sum(hist * np.log2(hist)))
-
-
-def _glcm_features(gray_u8: np.ndarray, mask: np.ndarray) -> dict[str, float]:
-    coords = np.argwhere(mask)
-    if coords.size == 0:
-        return {"contrast": 0.0, "homogeneity": 0.0, "energy": 0.0}
-    ys = coords[:, 0]
-    xs = coords[:, 1]
-    y0, y1 = int(ys.min()), int(ys.max()) + 1
-    x0, x1 = int(xs.min()), int(xs.max()) + 1
-    crop = gray_u8[y0:y1, x0:x1]
-    if crop.size == 0:
-        return {"contrast": 0.0, "homogeneity": 0.0, "energy": 0.0}
-    levels = 16
-    quantized = np.floor(crop.astype(np.float32) / (256 / levels)).astype(np.uint8)
-    glcm = graycomatrix(quantized, distances=[1], angles=[0], levels=levels, symmetric=True, normed=True)
-    return {
-        "contrast": float(graycoprops(glcm, "contrast")[0, 0]),
-        "homogeneity": float(graycoprops(glcm, "homogeneity")[0, 0]),
-        "energy": float(graycoprops(glcm, "energy")[0, 0]),
-    }
-
-
-def _fft_features(gray_u8: np.ndarray, mask: np.ndarray) -> dict[str, float]:
-    coords = np.argwhere(mask)
-    if coords.size == 0:
-        return {"highfreq_ratio": 0.0, "peak_ratio": 0.0}
-    y0, y1 = int(coords[:, 0].min()), int(coords[:, 0].max()) + 1
-    x0, x1 = int(coords[:, 1].min()), int(coords[:, 1].max()) + 1
-    crop = gray_u8[y0:y1, x0:x1].astype(np.float32)
-    if crop.size == 0:
-        return {"highfreq_ratio": 0.0, "peak_ratio": 0.0}
-    crop = crop - float(np.mean(crop))
-    spectrum = np.fft.fftshift(np.fft.fft2(crop))
-    power = np.abs(spectrum) ** 2
-    h, w = power.shape
-    cy, cx = h // 2, w // 2
-    yy, xx = np.ogrid[:h, :w]
-    radius = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
-    high = power[radius > min(h, w) * 0.25].sum()
-    total = power.sum() + 1e-6
-    peak_ratio = float(power.max() / total)
-    return {"highfreq_ratio": float(high / total), "peak_ratio": peak_ratio}
-
-
-def _rgb_to_saturation(color_pixels: np.ndarray) -> np.ndarray:
-    if color_pixels.size == 0:
-        return np.array([], dtype=float)
-    maxc = color_pixels.max(axis=1)
-    minc = color_pixels.min(axis=1)
-    sat = (maxc - minc) / np.clip(maxc, 1e-6, None)
-    return np.clip(sat, 0.0, 1.0)

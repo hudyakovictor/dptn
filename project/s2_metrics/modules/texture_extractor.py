@@ -85,6 +85,8 @@ QUALITY_SENSITIVE_METRICS = {
     "entropy_w21_mean",
     "lbp_ror_r1_std",
     "lbp_uniform_r1_mean",
+    "lbp_complexity_ratio",
+    "skin_brightness_std",
     "residual_bio_iqr",
     "residual_bio_p10",
     "residual_bio_p90",
@@ -151,6 +153,22 @@ class TextureExtractor:
         if exclude_sensitive and self._should_exclude_sensitive(quality):
             result = self._filter_sensitive_metrics(result)
             self._quality_sensitive_excluded = True
+
+        # texture_unreliable: флаг для downstream потребителей
+        sigma_est = result.get("texture_noise_sigma", 0.0)
+        noise_level = quality.get("noise_level", 0.0)
+        sharpness = quality.get("sharpness_score", 1000.0)
+        result["texture_unreliable"] = bool(
+            sigma_est > 15.0
+            or noise_level > 25.0
+            or sharpness < 50.0
+        )
+
+        # Сохраняем веса фич для downstream (аномалия, классификатор)
+        self._feature_weights = {
+            k: self._feature_weight(k, quality) for k in result
+        }
+        result["texture_feature_weights_json"] = str(self._feature_weights)
 
         return result
 
@@ -275,6 +293,19 @@ class TextureExtractor:
 
         return False
 
+    def _feature_weight(self, feature_name: str, quality: dict[str, float]) -> float:
+        """Вес фичи 0..1. 1.0 = полностью надёжна, 0.0 = бесполезна."""
+        if feature_name not in QUALITY_SENSITIVE_METRICS:
+            # Не-чувствительные фичи всегда полны
+            return 1.0
+        noise = quality.get("noise_level", 0.0)
+        sharpness = quality.get("sharpness_score", 1000.0)
+        # Вес падает линейно с ростом шума
+        noise_weight = max(0.0, 1.0 - (noise - 5.0) / 30.0)
+        # Вес падает с падением sharpness
+        sharp_weight = max(0.0, min(1.0, sharpness / 200.0))
+        return noise_weight * sharp_weight
+
     def _filter_sensitive_metrics(self, metrics: dict[str, float]) -> dict[str, float]:
         """Удаляет метрики, чувствительные к шуму/блюру."""
         return {k: v for k, v in metrics.items() if k not in QUALITY_SENSITIVE_METRICS}
@@ -302,6 +333,19 @@ class TextureExtractor:
             # Применяем CLAHE для нормализации освещения
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray_clahe = clahe.apply(gray_u8)
+
+            # Wavelet denoising: убираем плёночное зерно и JPEG-артефакты
+            # до вычисления текстурных фич, не размывая микроструктуру пор
+            from skimage.restoration import estimate_sigma, denoise_wavelet
+            sigma_est = estimate_sigma(gray_clahe, channel_axis=None)
+            result["texture_noise_sigma"] = float(sigma_est)
+            if sigma_est > 2.0:
+                gray_denoised = denoise_wavelet(
+                    gray_clahe, sigma=sigma_est,
+                    method="BayesShrink", mode="soft",
+                    rescale_sigma=True,
+                )
+                gray_clahe = np.clip(gray_denoised * 255, 0, 255).astype(np.uint8)
 
             # Используем ТОЛЬКО пиксели кожи
             skin_pixels = gray_u8[skin_mask > 0]
@@ -333,6 +377,25 @@ class TextureExtractor:
             
             result["texture_lbp_uniformity"] = float(np.std(lbp1_skin)) if lbp1_skin.size > 0 else 0.0
             result["lbp_uniform_r5_std"] = float(np.std(lbp2_skin)) if lbp2_skin.size > 0 else 0.0
+
+            # lbp_complexity_ratio: доля non-uniform паттернов (R=2, method=nri_uniform)
+            # uniform patterns: коды 0..9 для P=8 → count / total
+            if lbp2_skin.size > 0:
+                nri2 = local_binary_pattern(gray_clahe, P=8, R=2, method="nri_uniform")
+                nri2_skin = nri2[skin_mask > 0]
+                n_total = nri2_skin.size
+                if n_total > 0:
+                    hist_nri, _ = np.histogram(nri2_skin, bins=60, range=(0, 60), density=False)
+                    # uniform patterns: P+2 patterns (codes 0..P+1 = 0..10)
+                    n_uniform = hist_nri[:10].sum()  # codes 0..9
+                    result["lbp_complexity_ratio"] = float(1.0 - n_uniform / n_total)
+                else:
+                    result["lbp_complexity_ratio"] = 0.0
+            else:
+                result["lbp_complexity_ratio"] = 0.0
+
+            # skin_brightness_std: std яркости в области кожи (для классификатора)
+            result["skin_brightness_std"] = float(np.std(skin_pixels.astype(np.float64))) if skin_pixels.size > 0 else 0.0
 
             # GLCM — квантизация по перцентилям [2, 98] (levels=33)
             from skimage.feature import graycomatrix, graycoprops
@@ -394,20 +457,71 @@ class TextureExtractor:
             else:
                 result["residual_bio_iqr"] = 0.0
 
-            # FFT (только кожа)
-            # Создаём изображение только с кожей
-            skin_only = gray_clahe.copy()
-            skin_only[skin_mask == 0] = 0
-            
-            f = np.fft.fft2(skin_only.astype(np.float32))
-            fshift = np.fft.fftshift(f)
-            magnitude = np.abs(fshift)
-            h, w = gray_clahe.shape
-            cy, cx = h // 2, w // 2
-            low_freq = magnitude[cy-10:cy+10, cx-10:cx+10].mean()
-            high_freq = magnitude.mean()
-            result["texture_fft_highfreq_ratio"] = float(high_freq / (low_freq + 1e-6))
-            result["texture_fft_peak_ratio"] = float(magnitude.max() / (magnitude.mean() + 1e-6))
+            # FFT — patch-based, не zero-padded (исправляет артефакты)
+            # Делим область кожи на патчи и считаем FFT на каждом
+            skin_coords = np.argwhere(skin_mask > 0)
+            if skin_coords.size >= 64 * 64:
+                y0, x0 = skin_coords[:, 0].min(), skin_coords[:, 1].min()
+                y1, x1 = skin_coords[:, 0].max() + 1, skin_coords[:, 1].max() + 1
+                crop = gray_clahe[y0:y1, x0:x1]
+                crop_mask = skin_mask[y0:y1, x0:x1]
+                
+                # Patch-based FFT (64x64 patches, 50% overlap)
+                patch_size = 64
+                stride = 32
+                high_ratios = []
+                peak_ratios = []
+                for py in range(0, crop.shape[0] - patch_size + 1, stride):
+                    for px in range(0, crop.shape[1] - patch_size + 1, stride):
+                        patch = crop[py:py+patch_size, px:px+patch_size].astype(np.float32)
+                        patch_mask = crop_mask[py:py+patch_size, px:px+patch_size]
+                        if patch_mask.sum() < patch_size * patch_size * 0.5:
+                            continue  # недостаточно кожи в патче
+                        
+                        # Fill non-skin with mean of skin pixels
+                        patch_skin = patch[patch_mask > 0]
+                        if patch_skin.size == 0:
+                            continue
+                        patch_mean = patch_skin.mean()
+                        patch_filled = patch.copy()
+                        patch_filled[patch_mask == 0] = patch_mean
+                        
+                        patch_filled = patch_filled - patch_filled.mean()
+                        f = np.fft.fft2(patch_filled)
+                        fshift = np.fft.fftshift(f)
+                        magnitude = np.abs(fshift)
+                        
+                        h, w = magnitude.shape
+                        cy, cx = h // 2, w // 2
+                        yy, xx = np.ogrid[:h, :w]
+                        radius = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+                        
+                        low = magnitude[radius <= 4].sum()
+                        high = magnitude[radius > 8].sum()
+                        total = magnitude.sum() + 1e-6
+                        
+                        if low > 0:
+                            high_ratios.append(high / low)
+                        peak_ratios.append(magnitude.max() / total)
+                
+                if high_ratios:
+                    result["texture_fft_highfreq_ratio"] = float(np.mean(high_ratios))
+                    result["texture_fft_highfreq_std"] = float(np.std(high_ratios))
+                else:
+                    result["texture_fft_highfreq_ratio"] = 0.0
+                    result["texture_fft_highfreq_std"] = 0.0
+                    
+                if peak_ratios:
+                    result["texture_fft_peak_ratio"] = float(np.mean(peak_ratios))
+                    result["texture_fft_peak_std"] = float(np.std(peak_ratios))
+                else:
+                    result["texture_fft_peak_ratio"] = 0.0
+                    result["texture_fft_peak_std"] = 0.0
+            else:
+                result["texture_fft_highfreq_ratio"] = 0.0
+                result["texture_fft_highfreq_std"] = 0.0
+                result["texture_fft_peak_ratio"] = 0.0
+                result["texture_fft_peak_std"] = 0.0
 
             # Edge density (только кожа)
             edges = cv2.Canny(gray_clahe, 40, 120)
@@ -436,6 +550,67 @@ class TextureExtractor:
                     result["color_mean"] = 0.0
                     result["color_variance"] = 0.0
 
+            # Albedo viability (L*a*b* analysis) — по ТЗ
+            if len(image.shape) == 3 and image.shape[2] >= 3:
+                lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+                l_chan = lab[:, :, 0][skin_mask > 0]
+                a_chan = lab[:, :, 1][skin_mask > 0]
+                b_chan = lab[:, :, 2][skin_mask > 0]
+                if a_chan.size > 0:
+                    result["albedo_a_mean"] = float(np.mean(a_chan))
+                    result["albedo_a_std"] = float(np.std(a_chan))
+                    result["albedo_b_mean"] = float(np.mean(b_chan))
+                    result["albedo_b_std"] = float(np.std(b_chan))
+                    result["albedo_l_mean"] = float(np.mean(l_chan))
+                    result["albedo_l_std"] = float(np.std(l_chan))
+                    # viability index: вариативность a* (гемоглобин) / яркость
+                    result["albedo_viability_index"] = float(np.std(a_chan) / (np.mean(l_chan) + 1e-6))
+                else:
+                    result["albedo_a_mean"] = result["albedo_a_std"] = 0.0
+                    result["albedo_b_mean"] = result["albedo_b_std"] = 0.0
+                    result["albedo_l_mean"] = result["albedo_l_std"] = 0.0
+                    result["albedo_viability_index"] = 0.0
+
+            # Pore analysis — morphological top-hat at multiple radii
+            from skimage.morphology import white_tophat, disk
+            for r_name, r in [("r2", 2), ("r4", 4), ("r6", 6), ("r8", 8)]:
+                tophat = white_tophat(gray_clahe, disk(r))
+                tophat_skin = tophat[skin_mask > 0]
+                if tophat_skin.size > 0:
+                    result[f"pore_tophat_{r_name}_mean"] = float(np.mean(tophat_skin))
+                    result[f"pore_tophat_{r_name}_std"] = float(np.std(tophat_skin))
+                    # density of pore-like structures
+                    threshold = np.mean(tophat_skin) + np.std(tophat_skin)
+                    pore_count = np.sum(tophat_skin > threshold)
+                    skin_area_cm2 = (skin_mask > 0).sum() * 0.01  # rough calibration
+                    result[f"pore_density_{r_name}"] = float(pore_count / max(skin_area_cm2, 1.0))
+                else:
+                    result[f"pore_tophat_{r_name}_mean"] = 0.0
+                    result[f"pore_tophat_{r_name}_std"] = 0.0
+                    result[f"pore_density_{r_name}"] = 0.0
+
+            # Specular highlight analysis
+            if len(image.shape) == 3 and image.shape[2] >= 3:
+                hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+                v_skin = hsv[:, :, 2][skin_mask > 0]
+                s_skin = hsv[:, :, 1][skin_mask > 0]
+                if v_skin.size > 0:
+                    # high value, low saturation = specular
+                    specular_mask = (v_skin > 220) & (s_skin < 40)
+                    result["specular_ratio"] = float(np.mean(specular_mask))
+                    # specular patch size (compact vs spread)
+                    specular_pixels = v_skin[specular_mask]
+                    if specular_pixels.size > 0:
+                        result["specular_intensity_mean"] = float(np.mean(specular_pixels))
+                        result["specular_intensity_std"] = float(np.std(specular_pixels))
+                    else:
+                        result["specular_intensity_mean"] = 0.0
+                        result["specular_intensity_std"] = 0.0
+                else:
+                    result["specular_ratio"] = 0.0
+                    result["specular_intensity_mean"] = 0.0
+                    result["specular_intensity_std"] = 0.0
+
             # Texture ROI метрики
             if _HAS_TEXTURE_ROI and hasattr(ctx, 'uv_coords') and ctx.uv_coords is not None:
                 try:
@@ -445,6 +620,117 @@ class TextureExtractor:
                             result[mv.spec.name] = float(mv.value)
                 except Exception:
                     pass
+
+            # Multi-scale texture analysis (гауссова пирамида, 3 уровня)
+            result.update(self._extract_multiscale_texture(gray_clahe, skin_mask))
+
+        except Exception:
+            pass
+
+        return result
+
+    def _extract_multiscale_texture(
+        self, gray_clahe: np.ndarray, skin_mask: np.ndarray
+    ) -> dict[str, float]:
+        """Multi-scale текстурный анализ: 3 уровня гауссовой пирамиды.
+        Уровень 0: оригинал (поры, micro-texture)
+        Уровень 1: x0.5 (морфология, морщины)
+        Уровень 2: x0.25 (глубокие тени, глобальная структура)
+        """
+        from skimage.transform import pyramid_gaussian
+        from skimage.feature import local_binary_pattern, graycomatrix, graycoprops
+        from skimage.morphology import white_tophat, disk
+        from scipy.ndimage import uniform_filter
+
+        result = {}
+        try:
+            pyramid = list(pyramid_gaussian(
+                gray_clahe.astype(np.float64) / 255.0,
+                downscale=2, multichannel=False,
+            ))
+            pyramid = pyramid[:3]  # 3 уровня
+
+            skin_mask_f = skin_mask.astype(bool)
+            level_weights = [0.5, 0.3, 0.2]
+
+            for level, (img_f, w) in enumerate(zip(pyramid, level_weights)):
+                img_u8 = np.clip(img_f * 255, 0, 255).astype(np.uint8)
+                # Resize mask to match level dimensions
+                if img_u8.shape != skin_mask_f.shape:
+                    mask_level = cv2.resize(
+                        skin_mask_f.astype(np.uint8),
+                        (img_u8.shape[1], img_u8.shape[0]),
+                        interpolation=cv2.INTER_NEAREST,
+                    ).astype(bool)
+                else:
+                    mask_level = skin_mask_f
+
+                skin_px = img_u8[mask_level]
+                if skin_px.size < 100:
+                    continue
+
+                prefix = f"ms_l{level}_"
+
+                # Gray stats
+                result[f"{prefix}gray_mean"] = float(np.mean(skin_px)) * w
+                result[f"{prefix}gray_std"] = float(np.std(skin_px)) * w
+
+                # LBP uniformity (R=1 на уровне 0, R=2 на уровне 1)
+                if level <= 1:
+                    R = 1 if level == 0 else 2
+                    lbp = local_binary_pattern(img_u8, P=8, R=R, method="uniform")
+                    lbp_skin = lbp[mask_level]
+                    if lbp_skin.size > 0:
+                        result[f"{prefix}lbp_std"] = float(np.std(lbp_skin)) * w
+
+                # GLCM contrast (d=3 на уровне 0, d=5 на уровне 1)
+                if level <= 1:
+                    d = 3 if level == 0 else 5
+                    try:
+                        from skimage.feature import graycomatrix, graycoprops
+                        # Квантизация по перцентилям
+                        p2, p98 = np.percentile(skin_px, [2, 98])
+                        if p98 - p2 > 1:
+                            quantized = np.clip(
+                                (img_u8.astype(float) - p2) / (p98 - p2) * 32, 0, 32
+                            ).astype(np.uint8)
+                        else:
+                            quantized = img_u8
+                        glcm = graycomatrix(quantized, [d], [0], levels=33, symmetric=True, normed=True)
+                        contrast = graycoprops(glcm, "contrast")[0, 0]
+                        result[f"{prefix}glcm_contrast"] = float(contrast) * w
+                    except Exception:
+                        pass
+
+                # Tophat (pore analysis на уровне 0)
+                if level == 0:
+                    for r_name, r in [("r2", 2), ("r4", 4)]:
+                        try:
+                            tophat = white_tophat(img_u8, disk(r))
+                            tophat_skin = tophat[mask_level]
+                            if tophat_skin.size > 0:
+                                result[f"{prefix}pore_{r_name}_std"] = float(np.std(tophat_skin)) * w
+                        except Exception:
+                            pass
+
+                # Local variability
+                for w_name, win in [("w15", 15), ("w31", 31)]:
+                    img_f64 = img_u8.astype(np.float64)
+                    local_m = uniform_filter(img_f64, size=win)
+                    local_m_sq = uniform_filter(img_f64 ** 2, size=win)
+                    local_var = np.maximum(local_m_sq - local_m ** 2, 0)
+                    local_std = np.sqrt(local_var)
+                    skin_local_m = local_m[mask_level]
+                    skin_local_std = local_std[mask_level]
+                    valid = skin_local_m > 0.01
+                    if valid.any():
+                        cv_vals = skin_local_std[valid] / skin_local_m[valid]
+                        cv_vals = np.clip(cv_vals, 0.0, 10.0)
+                        result[f"{prefix}local_var_{w_name}_cv"] = float(np.mean(cv_vals)) * w
+
+            # Weighted aggregation: итоговые фичи = сумма(level_i * weight_i)
+            # Уже учтено в умножении на w выше
+
         except Exception:
             pass
 

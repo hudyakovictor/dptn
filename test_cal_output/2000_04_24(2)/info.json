@@ -1,0 +1,49 @@
+{
+  "age_years": 47.55,
+  "dataset": "calibration",
+  "date": "2000-04-24",
+  "expression_flags": {
+    "jaw_excluded": false,
+    "neutralized": false,
+    "smile_excluded": false
+  },
+  "face_bbox": [
+    5,
+    5,
+    186,
+    176
+  ],
+  "face_mask_path": "test_cal_output/2000_04_24(2)/face_mask.png",
+  "image_size": [
+    800,
+    800
+  ],
+  "photo_id": "2000_04_24(2)",
+  "pose": {
+    "age_years": 47.55,
+    "bucket": "right_threequarter_light",
+    "confidence": 0.8,
+    "date": "2000-04-24",
+    "photo_id": "2000_04_24(2)",
+    "pitch": 3.8601841926574707,
+    "pose_source": "3ddfa_v3",
+    "roll": -3.631702423095703,
+    "yaw": 16.46515464782715
+  },
+  "quality": {
+    "blur_value": 136.79503441767335,
+    "is_jpeg_blocky": true,
+    "is_motion_blurred": false,
+    "is_over_smoothed": false,
+    "jpeg_blockiness": 1.5398425102233886,
+    "noise_level": 1.0061280727386475,
+    "overall_quality": 0.38713256918318295,
+    "sharpness_score": 0.13679503441767335
+  },
+  "readiness": {
+    "geometry": "available",
+    "texture": "available"
+  },
+  "reconstruction_path": "test_cal_output/2000_04_24(2)/reconstruction.pkl",
+  "source_path": "test_photos/test dataset (real skin and silicone skin)/real2/2000_04_24(2).jpg"
+}

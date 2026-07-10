@@ -3,12 +3,16 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, List, Any
 
 import numpy as np
 
 from ..shared.logging import setup_logger
 from ..shared.schemas import CalibrationReference, PipelineDataset, Stage1Record, Stage2Record, Stage3Record
 from ..shared.utils import ensure_dir, load_json, save_json, subject_age_years_at
+from .calibration_builder import PoseAwareCalibrationBuilder
+from .noise_discount import CalibratedNoiseDiscount
+from .health_monitor import CalibrationHealthMonitor
 
 logger = setup_logger("deeputin.s3")
 
@@ -24,12 +28,39 @@ class CalibrationEngine:
             logger.warning("Нет calibration stage2 записей в %s", calibration_root)
             return None
 
+        stage1_records = self._load_stage1_records(root)
+        
+        # Convert Stage2Record to dict for new calibration builder
+        calibration_data = []
+        for record in records:
+            stage1 = stage1_records.get(record.photo_id)
+            calibration_data.append({
+                "bucket": record.bucket.value,
+                "pose": {"yaw": record.pose.yaw if hasattr(record, 'pose') else 0, 
+                         "pitch": record.pose.pitch if hasattr(record, 'pose') else 0, 
+                         "roll": record.pose.roll if hasattr(record, 'pose') else 0},
+                "quality": record.quality.overall_quality if hasattr(record.quality, 'overall_quality') else 0.5,
+                "age_years": stage1.age_years if stage1 else None,
+                "geometry": dict(record.geometry),
+                "texture": dict(record.texture),
+            })
+
+        # Build new pose-aware calibration
+        builder = PoseAwareCalibrationBuilder(min_pairs=self.config.get("min_calibration_pairs", 10))
+        pose_models = builder.build(calibration_data)
+
+        # Health monitoring
+        monitor = CalibrationHealthMonitor()
+        health_results = monitor.check(pose_models, calibration_data)
+        health_summary = monitor.summary(health_results)
+        logger.info(f"Calibration health: {health_summary}")
+
+        # Build legacy reference format for backward compatibility
         bucket_stats: dict[str, dict[str, dict[str, float]]] = {}
         pairwise_noise: dict[str, dict[str, dict[str, float]]] = {}
         age_profiles: dict[str, dict[str, dict[str, float]]] = {}
         global_stats: dict[str, dict[str, float]] = {}
         selected_metric_keys: list[str] = []
-        stage1_records = self._load_stage1_records(root)
 
         grouped: dict[str, list[Stage2Record]] = defaultdict(list)
         for record in records:
@@ -63,10 +94,34 @@ class CalibrationEngine:
             notes=[
                 "Stage 3 строит baseline только по калибровочным фото, где человек считается оригинальным.",
                 "Все геометрические и текстурные шумы интерпретируются как вариативность съёмки и реконструкции.",
+                f"Pose-aware calibration: {health_summary['healthy']} healthy, {health_summary['degraded']} degraded, {health_summary['insufficient']} insufficient buckets.",
             ],
         )
         save_json(reference.model_dump(), Path(calibration_root) / "calibration_reference.json")
+        
+        # Also save new calibration models
+        self._save_pose_models(pose_models, Path(calibration_root))
+        
         return reference
+
+    def _save_pose_models(self, models: Dict, path: Path) -> None:
+        """Save pose-aware calibration models."""
+        import json
+        data = {}
+        for bucket, model in models.items():
+            data[bucket] = {
+                "bucket": model.bucket,
+                "intercept": model.intercept,
+                "slope": model.slope,
+                "curvature": model.curvature,
+                "p05": model.p05,
+                "p95": model.p95,
+                "mad": model.mad,
+                "sample_count": model.sample_count,
+                "quality_breakdown": model.quality_breakdown,
+            }
+        with open(path / "pose_calibration_models.json", "w") as f:
+            json.dump(data, f, indent=2)
 
     def save_reference(self, reference: CalibrationReference, path: str | Path) -> Path:
         return save_json(reference.model_dump(), path)

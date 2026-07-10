@@ -230,23 +230,33 @@ def pose_hint_from_name(stem: str) -> tuple[float, float, float, PoseBucket, str
 
 
 def classify_pose_bucket(yaw: float, pitch: float, roll: float = 0.0, fallback: PoseBucket = PoseBucket.UNKNOWN) -> PoseBucket:
+    """
+    Classify pose into 9 buckets based on yaw angle.
+    Based on 3DDFA-V3 yaw convention: positive = right turn, negative = left turn.
+    Thresholds from audit spec:
+    - frontal: |yaw| < 10
+    - threequarter_light: 10-33
+    - threequarter_medium: 33-56
+    - threequarter_deep: 56-78
+    - profile: 78+
+    """
     ay = abs(float(yaw))
-    if ay < 12:
+    if ay < 10:
         return PoseBucket.FRONTAL
     if yaw < 0:
-        if ay < 30:
+        if ay < 33:
             return PoseBucket.LEFT_THREEQUARTER_LIGHT
-        if ay < 55:
+        if ay < 56:
             return PoseBucket.LEFT_THREEQUARTER_MEDIUM
-        if ay < 80:
+        if ay < 78:
             return PoseBucket.LEFT_THREEQUARTER_DEEP
         return PoseBucket.LEFT_PROFILE
     if yaw > 0:
-        if ay < 30:
+        if ay < 33:
             return PoseBucket.RIGHT_THREEQUARTER_LIGHT
-        if ay < 55:
+        if ay < 56:
             return PoseBucket.RIGHT_THREEQUARTER_MEDIUM
-        if ay < 80:
+        if ay < 78:
             return PoseBucket.RIGHT_THREEQUARTER_DEEP
         return PoseBucket.RIGHT_PROFILE
     return fallback

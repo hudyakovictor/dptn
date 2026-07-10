@@ -1,0 +1,254 @@
+{
+  "anomaly_score": 2.69,
+  "points": [
+    {
+      "age_years": 45.24,
+      "bucket": "left_threequarter_light",
+      "chronology_score": 0.0,
+      "date": "1998-01-01",
+      "details": {
+        "age_years": 45.24
+      },
+      "flags": [
+        "spike:texture_specular_ratio"
+      ],
+      "photo_id": "1998_01_01"
+    },
+    {
+      "age_years": 46.26,
+      "bucket": "left_threequarter_medium",
+      "chronology_score": 3.0,
+      "date": "1999-01-11",
+      "details": {
+        "age_years": 46.26
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=3.693:gap_days=171",
+        "return_to_baseline:bone_nasion_depth",
+        "return_to_baseline:bone_orbit_L_depth",
+        "return_to_baseline:bone_orbit_R_depth",
+        "return_to_baseline:mesh_bbox_volume",
+        "return_to_baseline:mesh_vertex_count",
+        "spike:texture_specular_ratio"
+      ],
+      "photo_id": "1999_01_11"
+    },
+    {
+      "age_years": 46.73,
+      "bucket": "left_threequarter_light",
+      "chronology_score": 3.0,
+      "date": "1999-07-01",
+      "details": {
+        "age_years": 46.73
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=3.693:gap_days=171",
+        "IMPOSSIBLE_BONE_RATE:bone_gonial_angle:delta=3.693:gap_days=171",
+        "return_to_baseline:texture_color_std",
+        "spike:texture_specular_ratio"
+      ],
+      "photo_id": "1999_07_01"
+    },
+    {
+      "age_years": 46.85,
+      "bucket": "left_threequarter_light",
+      "chronology_score": 3.0,
+      "date": "1999-08-12",
+      "details": {
+        "age_years": 46.85
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_RATE:bone_gonial_angle:delta=1.467:gap_days=42",
+        "RETURN_TO_BASELINE:bone_nasion_depth:earlier_dev=0.287:current_dev=0.021",
+        "RETURN_TO_BASELINE:bone_orbit_L_depth:earlier_dev=0.206:current_dev=0.002",
+        "RETURN_TO_BASELINE:bone_orbit_R_depth:earlier_dev=0.363:current_dev=0.028",
+        "RETURN_TO_BASELINE:bone_zygomatic_width:earlier_dev=0.000:current_dev=0.000",
+        "RETURN_TO_BASELINE:mesh_bbox_depth:earlier_dev=0.128:current_dev=0.021",
+        "RETURN_TO_BASELINE:mesh_bbox_width:earlier_dev=0.082:current_dev=0.030",
+        "RETURN_TO_BASELINE:texture_color_std:earlier_dev=16.367:current_dev=5.794",
+        "RETURN_TO_BASELINE:texture_fft_highfreq_ratio:earlier_dev=16.984:current_dev=3.821",
+        "RETURN_TO_BASELINE:texture_fft_highfreq_std:earlier_dev=8.889:current_dev=0.411",
+        "RETURN_TO_BASELINE:texture_glcm_contrast:earlier_dev=34.869:current_dev=3.935",
+        "RETURN_TO_BASELINE:texture_gray_std:earlier_dev=29.780:current_dev=6.138",
+        "RETURN_TO_BASELINE:texture_laplacian_var:earlier_dev=4175.376:current_dev=959.622",
+        "RETURN_TO_BASELINE:texture_saturation:earlier_dev=0.251:current_dev=0.103",
+        "age_inversion:texture_color_std",
+        "age_inversion:texture_fft_peak_std",
+        "age_inversion:texture_glcm_energy",
+        "age_inversion:texture_gray_std",
+        "spike:mesh_symmetry_x",
+        "spike:texture_color_std",
+        "spike:texture_fft_highfreq_ratio",
+        "spike:texture_fft_highfreq_std",
+        "spike:texture_glcm_contrast",
+        "spike:texture_gray_std"
+      ],
+      "photo_id": "1999_08_12"
+    },
+    {
+      "age_years": 46.85,
+      "bucket": "right_threequarter_light",
+      "chronology_score": 3.0,
+      "date": "1999-08-12",
+      "details": {
+        "age_years": 46.85
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=19.124:gap_days=4",
+        "elevated_change:bone_asymmetry_x_p95",
+        "elevated_change:bone_gonial_angle",
+        "elevated_change:texture_entropy",
+        "elevated_change:texture_glcm_homogeneity",
+        "elevated_change:texture_laplacian_var",
+        "spike:mesh_symmetry_x",
+        "spike:texture_color_std",
+        "spike:texture_fft_highfreq_ratio",
+        "spike:texture_fft_highfreq_std",
+        "spike:texture_glcm_contrast",
+        "spike:texture_gray_std"
+      ],
+      "photo_id": "1999_08_12 (2)"
+    },
+    {
+      "age_years": 46.86,
+      "bucket": "right_threequarter_medium",
+      "chronology_score": 3.0,
+      "date": "1999-08-16",
+      "details": {
+        "age_years": 46.86
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=19.124:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_asymmetry_x:delta=0.282:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_asymmetry_x_p95:delta=0.231:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_chin_projection:delta=0.102:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_gonial_angle:delta=19.124:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_nasion_depth:delta=0.472:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_L_depth:delta=0.519:gap_days=4",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_R_depth:delta=0.313:gap_days=4",
+        "RETURN_TO_BASELINE:mesh_bbox_height:earlier_dev=0.136:current_dev=0.041",
+        "RETURN_TO_BASELINE:mesh_bbox_volume:earlier_dev=0.320:current_dev=0.065",
+        "RETURN_TO_BASELINE:mesh_symmetry_x:earlier_dev=0.022:current_dev=0.006",
+        "RETURN_TO_BASELINE:texture_edge_density:earlier_dev=0.276:current_dev=0.046",
+        "RETURN_TO_BASELINE:texture_fft_highfreq_ratio:earlier_dev=28.251:current_dev=4.895",
+        "RETURN_TO_BASELINE:texture_fft_highfreq_std:earlier_dev=7.734:current_dev=3.556",
+        "RETURN_TO_BASELINE:texture_fft_peak_ratio:earlier_dev=0.005:current_dev=0.001",
+        "RETURN_TO_BASELINE:texture_glcm_contrast:earlier_dev=73.774:current_dev=9.358",
+        "RETURN_TO_BASELINE:texture_glcm_homogeneity:earlier_dev=0.542:current_dev=0.128",
+        "RETURN_TO_BASELINE:texture_laplacian_var:earlier_dev=4125.111:current_dev=104.482",
+        "RETURN_TO_BASELINE:texture_lbp_uniformity:earlier_dev=0.890:current_dev=0.240",
+        "RETURN_TO_BASELINE:texture_saturation:earlier_dev=0.103:current_dev=0.009",
+        "age_inversion:texture_fft_peak_std",
+        "age_inversion:texture_glcm_energy",
+        "elevated_change:mesh_bbox_height",
+        "elevated_change:texture_glcm_contrast",
+        "spike:mesh_bbox_height",
+        "spike:texture_fft_highfreq_ratio",
+        "spike:texture_fft_highfreq_std",
+        "spike:texture_fft_peak_std"
+      ],
+      "photo_id": "1999_08_16"
+    },
+    {
+      "age_years": 46.86,
+      "bucket": "right_threequarter_light",
+      "chronology_score": 2.9000000000000004,
+      "date": "1999-08-16",
+      "details": {
+        "age_years": 46.86
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=17.780:gap_days=16",
+        "elevated_change:texture_entropy",
+        "elevated_change:texture_fft_peak_ratio",
+        "return_to_baseline:texture_color_std",
+        "spike:mesh_bbox_height",
+        "spike:texture_fft_peak_std"
+      ],
+      "photo_id": "1999_08_16(2)"
+    },
+    {
+      "age_years": 46.9,
+      "bucket": "frontal",
+      "chronology_score": 3.0,
+      "date": "1999-09-01",
+      "details": {
+        "age_years": 46.9
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_CHANGE:bone_gonial_angle:delta=17.780:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_asymmetry_x:delta=0.243:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_asymmetry_x_p95:delta=0.424:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_chin_projection:delta=0.323:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_gonial_angle:delta=17.780:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_nasion_depth:delta=0.517:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_L_depth:delta=0.607:gap_days=16",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_R_depth:delta=0.423:gap_days=16",
+        "RETURN_TO_BASELINE:bone_asymmetry_x:earlier_dev=0.246:current_dev=0.107",
+        "RETURN_TO_BASELINE:bone_gonial_angle:earlier_dev=23.106:current_dev=1.219",
+        "RETURN_TO_BASELINE:bone_nasion_depth:earlier_dev=0.459:current_dev=0.214",
+        "RETURN_TO_BASELINE:bone_orbit_L_depth:earlier_dev=0.622:current_dev=0.140",
+        "RETURN_TO_BASELINE:mesh_bbox_depth:earlier_dev=0.145:current_dev=0.068",
+        "RETURN_TO_BASELINE:mesh_bbox_volume:earlier_dev=0.125:current_dev=0.021",
+        "RETURN_TO_BASELINE:texture_entropy:earlier_dev=0.187:current_dev=0.079",
+        "RETURN_TO_BASELINE:texture_fft_peak_ratio:earlier_dev=0.015:current_dev=0.006",
+        "RETURN_TO_BASELINE:texture_fft_peak_std:earlier_dev=0.006:current_dev=0.002",
+        "RETURN_TO_BASELINE:texture_glcm_contrast:earlier_dev=9.358:current_dev=0.114",
+        "RETURN_TO_BASELINE:texture_glcm_homogeneity:earlier_dev=0.128:current_dev=0.000",
+        "age_inversion:texture_color_std",
+        "age_inversion:texture_glcm_energy",
+        "age_inversion:texture_gray_mean",
+        "spike:bone_asymmetry_x_p95",
+        "spike:bone_chin_projection",
+        "spike:bone_orbit_L_depth"
+      ],
+      "photo_id": "1999_09_01"
+    },
+    {
+      "age_years": 46.9,
+      "bucket": "right_threequarter_light",
+      "chronology_score": 3.0,
+      "date": "1999-09-01",
+      "details": {
+        "age_years": 46.9
+      },
+      "flags": [
+        "elevated_change:bone_gonial_angle",
+        "elevated_change:bone_nasion_depth",
+        "elevated_change:texture_color_std",
+        "elevated_change:texture_lbp_uniformity",
+        "elevated_change:texture_saturation",
+        "spike:bone_asymmetry_x_p95",
+        "spike:bone_chin_projection",
+        "spike:bone_orbit_L_depth",
+        "spike:texture_specular_ratio"
+      ],
+      "photo_id": "1999_09_01(2)"
+    },
+    {
+      "age_years": 46.92,
+      "bucket": "left_threequarter_light",
+      "chronology_score": 3.0,
+      "date": "1999-09-08",
+      "details": {
+        "age_years": 46.92
+      },
+      "flags": [
+        "IMPOSSIBLE_BONE_RATE:bone_gonial_angle:delta=1.888:gap_days=7",
+        "IMPOSSIBLE_BONE_RATE:bone_nasion_depth:delta=0.250:gap_days=7",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_L_depth:delta=0.089:gap_days=7",
+        "IMPOSSIBLE_BONE_RATE:bone_orbit_R_depth:delta=0.382:gap_days=7",
+        "age_inversion:texture_gray_mean",
+        "age_inversion:texture_specular_ratio",
+        "spike:texture_specular_ratio"
+      ],
+      "photo_id": "1999_09_08"
+    }
+  ],
+  "summary_flags": [
+    "strong_temporal_break",
+    "multiple_temporal_anomalies",
+    "biological_impossibility_detected",
+    "mask_swap_indicator"
+  ]
+}
