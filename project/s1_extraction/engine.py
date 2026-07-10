@@ -435,6 +435,7 @@ map_Kd {UV_TEXTURE_FILENAME}
             },
             "annotation_groups": [g.tolist() for g in recon.annotation_groups] if recon.annotation_groups else [],
             "seg_visible": recon.payload.get("seg_visible"),
+            "trans_params": recon.trans_params.tolist() if recon.trans_params is not None else None,
             "id_params": recon.payload.get("id_params", []).tolist() if isinstance(recon.payload.get("id_params"), np.ndarray) else [],
             "exp_params": recon.payload.get("exp_params", []).tolist() if isinstance(recon.payload.get("exp_params"), np.ndarray) else [],
         }
