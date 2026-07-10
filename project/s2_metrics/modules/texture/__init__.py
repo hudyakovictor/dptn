@@ -1,4 +1,17 @@
-from .catalog import TEXTURE_CORE_METRICS, load_texture_metric_catalog
-from .classifier import TextureSkinClassifier
+"""Texture V2 modules."""
 
-__all__ = ["TEXTURE_CORE_METRICS", "TextureSkinClassifier", "load_texture_metric_catalog"]
+from .extractor_v2 import TextureExtractorV2
+from .classifier import TextureSkinClassifierV2
+from .catalog import TEXTURE_CORE_METRICS, PHYSICAL_AUX_METRICS, load_texture_metric_catalog
+
+__all__ = [
+    "TextureExtractorV2",
+    "TextureSkinClassifierV2",
+    "TEXTURE_CORE_METRICS",
+    "PHYSICAL_AUX_METRICS",
+    "load_texture_metric_catalog",
+]
+
+# Backward compatibility
+TextureExtractor = TextureExtractorV2
+TextureSkinClassifier = TextureSkinClassifierV2

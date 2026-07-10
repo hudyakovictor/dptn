@@ -15,9 +15,8 @@ from ..shared.schemas import PipelineDataset, Stage1Record, Stage2Record
 from ..shared.utils import ensure_dir, load_json, load_pickle, load_rgba_png, save_json
 from .modules import GeometryIdentityResolver, TextureSkinClassifier, load_geometry_metric_catalog, load_texture_metric_catalog
 from .modules.geometry_extractor import GeometryExtractor
-from .modules.texture.aliases import project_texture_aliases
-from .modules.texture_extractor import TextureExtractor
-from .texture_anomaly import CohortTextureAnomalyDetector
+from .modules.texture.extractor_v2 import TextureExtractorV2
+from .texture_anomaly import CohortTextureAnomalyDetectorV2
 from .physical_features import PhysicalTextureExtractor
 
 
@@ -67,9 +66,9 @@ class MetricsEngine:
         self.texture_classifier = TextureSkinClassifier(texture_leaderboard)
         self.geometry_catalog = load_geometry_metric_catalog()
         self.texture_catalog = load_texture_metric_catalog(texture_leaderboard)
-        self.texture_extractor = TextureExtractor()
+        self.texture_extractor = TextureExtractorV2()
         self.geometry_extractor = GeometryExtractor()
-        self.cohort_detector = CohortTextureAnomalyDetector()
+        self.cohort_detector = CohortTextureAnomalyDetectorV2()
         self.physical_extractor = PhysicalTextureExtractor()
 
     def run(self) -> list[Stage2Record]:
@@ -86,7 +85,8 @@ class MetricsEngine:
                 raw_records.append((record, metrics))
                 logger.info("[s2] %s/%s %s", index, len(stage1_records), record.photo_id)
                 year = record.date.year if record.date else 2000
-                cohort_key = self.cohort_detector.get_cohort_key(year)
+                quality = float(record.quality.overall_quality) if record.quality else 0.5
+                cohort_key = self.cohort_detector.get_cohort_key(year, quality)
                 if cohort_key not in cohort_groups:
                     cohort_groups[cohort_key] = []
                 cohort_groups[cohort_key].append(metrics.texture)
@@ -104,8 +104,8 @@ class MetricsEngine:
         records: list[Stage2Record] = []
         for stage1_record, stage2_record in raw_records:
             year = stage1_record.date.year if stage1_record.date else 2000
-            cohort_key = self.cohort_detector.get_cohort_key(year)
             quality = float(stage1_record.quality.overall_quality) if stage1_record else 0.5
+            cohort_key = self.cohort_detector.get_cohort_key(year, quality)
             try:
                 anomaly_result = self.cohort_detector.score(stage2_record.texture, cohort_key, quality)
                 stage2_record.metric_notes["texture_anomaly_score"] = str(anomaly_result.anomaly_score)
@@ -172,7 +172,10 @@ class MetricsEngine:
         texture_ctx = TextureCtx()
         texture = self.texture_extractor.extract(texture_ctx, exclude_sensitive=False)
 
-        texture.update(project_texture_aliases(texture))
+        # Extract assessability fields from texture (strings, not floats)
+        texture_assessability = texture.pop("texture_assessability", "eligible")
+        q_valid_patches = texture.pop("q_valid_patches", 0)
+
         geometry_hint = self.geometry_resolver.resolve(geometry)
         texture_hint = self.texture_classifier.classify(texture, info.quality)
 
@@ -187,19 +190,18 @@ class MetricsEngine:
                     image_rgb = rgba[:, :, :3]
                     seg_mask = rgba[:, :, 3] > 128 if rgba.shape[2] == 4 else np.ones(rgba.shape[:2], dtype=bool)
                     pf = self.physical_extractor.extract(image_rgb, landmarks, seg_mask)
+                    # Tier 3 physical auxiliary metrics
                     physical_features = {
-                        "sss_index": pf.sss_index,
-                        "specular_sharpness": pf.specular_sharpness,
-                        "pore_periodicity": pf.pore_periodicity,
-                        "lbp_nonuniform_ratio": pf.lbp_nonuniform_ratio,
-                        "spectral_slope": pf.spectral_slope,
-                        "hemoglobin_index": pf.hemoglobin_index,
                         "seam_score": pf.seam_score,
-                        "wrinkle_anisotropy": pf.wrinkle_anisotropy,
-                        "wrinkle_dominant_angle": pf.wrinkle_dominant_angle,
+                        "specular_sharpness": pf.specular_sharpness,
+                        "sss_index": pf.sss_index,
+                        "melanin_hemo_slope": getattr(pf, 'melanin_hemo_slope', 0.0),
                     }
         except Exception:
             pass
+
+        # Merge Tier 3 physical aux into texture
+        texture.update(physical_features)
 
         texture_weights_json = texture.pop("texture_feature_weights_json", None)
         metric_notes = {
@@ -209,14 +211,12 @@ class MetricsEngine:
             "texture_skin_hint": texture_hint.get("texture_skin_hint", "unknown"),
             "geometry_catalog_size": str(len(self.geometry_catalog)),
             "texture_catalog_size": str(len(self.texture_catalog)),
-            "quality_sensitive_excluded": str(self.texture_extractor._quality_sensitive_excluded),
+            "quality_sensitive_excluded": "false",
         }
         if texture_weights_json:
             metric_notes["texture_feature_weights_json"] = texture_weights_json
         for k, v in physical_features.items():
             metric_notes[f"physical_{k}"] = str(v)
-        if self.texture_extractor._quality_sensitive_excluded:
-            metric_notes["quality_filter_reason"] = "low_quality_detected"
 
         selected_keys = sorted(set(geometry) | set(texture) | set(geometry_hint.get("selected_metric_keys", [])) | set(texture_hint.get("used_metrics", [])))
         stage2 = Stage2Record(
@@ -232,13 +232,14 @@ class MetricsEngine:
             geometry_identity_confidence=float(geometry_hint.get("identity_confidence", 0.0)),
             texture_skin_hint=str(texture_hint.get("texture_skin_hint", "unknown")),
             texture_skin_confidence=float(texture_hint.get("texture_skin_confidence", 0.0)),
+            texture_assessability=texture_assessability,
             quality_summary={
                 "overall_quality": float(info.quality.overall_quality),
                 "blur_value": float(info.quality.blur_value),
                 "noise_level": float(info.quality.noise_level),
                 "jpeg_blockiness": float(info.quality.jpeg_blockiness),
                 "sharpness_score": float(info.quality.sharpness_score),
-                "quality_sensitive_excluded": self.texture_extractor._quality_sensitive_excluded,
+                "quality_sensitive_excluded": False,
             },
         )
         save_json(stage2.geometry, photo_dir / "geometry_metrics.json")

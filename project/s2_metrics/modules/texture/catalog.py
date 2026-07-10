@@ -6,26 +6,38 @@ from typing import Any
 import pandas as pd
 
 TEXTURE_CORE_METRICS = [
-    "glcm_dissimilarity_d5_a0",
-    "glcm_homogeneity_d5_a0",
-    "glcm_dissimilarity_d3_a0",
-    "homo_local_var_w15_cv",
-    "contrast_weber_mean",
-    "homo_local_var_w31_cv",
-    "color_b_mean",
-    "glcm_homogeneity_d3_a0",
-    "glcm_dissimilarity_d3_a135",
-    "glcm_dissimilarity_d2_a0",
-    "lbp_uniform_r5_std",
-    "glcm_dissimilarity_d5_avg",
-    "glcm_dissimilarity_d3_avg",
-    "morph_tophat_r4_std",
-    "glcm_dissimilarity_d5_a135",
-    "glcm_dissimilarity_d2_range",
-    "grad_sobel_mag_skewness",
-    "residual_bio_iqr",
-    "morph_tophat_r8_std",
-    "glcm_dissimilarity_d5_a45",
+    # Tier 1 — Quality-Robust Core (12 метрик, работают на 1999 low-Q)
+    "tv_residual_sparsity",
+    "lacunarity",
+    "autocorr_decay_len",
+    "wld_joint_entropy",
+    "fft_high_low_ratio",
+    "spectral_slope_beta",
+    "glcm_diss_d3_aniso",
+    "pore_density_r2_mpx",
+    "hemoglobin_od_std",
+    "bimodality_ashman_D",
+    "glszm_small_area_emphasis",
+    "edge_tortuosity_mean",
+    # Tier 2 — High-Quality Extended (8 метрик, overall>=0.5 или sharpness>=200)
+    "glrlm_sre",
+    "ngtdm_coarseness",
+    "dwt_haar_HH_LL_ratio",
+    "lbp_r1_hist_entropy",
+    "shannon_entropy_q32",
+    "gabor_f08_anisotropy",
+    "pore_eccentricity_mean",
+    "specular_elongation",
+]
+
+TEXTURE_CORE_METRICS_V2 = TEXTURE_CORE_METRICS  # alias для совместимости
+
+# Physical auxiliary metrics (Tier 3) — не в CORE, используются в s5_verdict как boost
+PHYSICAL_AUX_METRICS = [
+    "seam_score",
+    "specular_sharpness",
+    "sss_index",
+    "melanin_hemo_slope",
 ]
 
 

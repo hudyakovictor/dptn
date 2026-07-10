@@ -107,6 +107,7 @@ class Stage2Record(BaseModel):
     geometry_identity_confidence: float = 0.0
     texture_skin_hint: str = "unknown"
     texture_skin_confidence: float = 0.0
+    texture_assessability: str = "eligible"  # eligible, low_confidence, not_assessable
     quality_summary: dict[str, float] = Field(default_factory=dict)
 
 
