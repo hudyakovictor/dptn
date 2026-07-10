@@ -31,6 +31,47 @@ from .modules.reconstruction import ReconstructionAdapter, resolve_reconstructio
 
 logger = setup_logger("deeputin.s1")
 
+FACE_CROP_WIDTH = 424
+FACE_CROP_HEIGHT = 500
+FACE_MASK_FILENAME = "face_mask.png"
+FACE_CROP_FILENAME = "face_crop.jpg"
+THUMB_FILENAME = "thumb.jpg"
+UV_TEXTURE_FILENAME = "uv_texture.png"
+UV_CONFIDENCE_FILENAME = "uv_confidence.png"
+MESH_OBJ_FILENAME = "mesh.obj"
+MESH_MTL_FILENAME = "mesh.mtl"
+
+
+def _resize_letterbox(bgr: np.ndarray, tw: int, th: int) -> np.ndarray:
+    """Вписать в tw×th без искажения пропорций (чёрные поля по краям)."""
+    h, w = bgr.shape[:2]
+    if h <= 0 or w <= 0:
+        return np.zeros((th, tw, 3), dtype=np.uint8)
+    scale = min(tw / w, th / h)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = cv2.resize(bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((th, tw, 3), dtype=np.uint8)
+    y0 = (th - nh) // 2
+    x0 = (tw - nw) // 2
+    canvas[y0: y0 + nh, x0: x0 + nw] = resized
+    return canvas
+
+
+def _resize_letterbox_gray(gray: np.ndarray, tw: int, th: int) -> np.ndarray:
+    h, w = gray.shape[:2]
+    if h <= 0 or w <= 0:
+        return np.zeros((th, tw), dtype=np.uint8)
+    scale = min(tw / w, th / h)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    canvas = np.zeros((th, tw), dtype=np.uint8)
+    y0 = (th - nh) // 2
+    x0 = (tw - nw) // 2
+    canvas[y0: y0 + nh, x0: x0 + nw] = resized
+    return canvas
+
 
 class ExtractionEngine:
     def __init__(
@@ -94,13 +135,18 @@ class ExtractionEngine:
             identity_only=self.identity_only,
         )
 
-        # Save face mask from 3DDFA seg_visible or fallback to oval
-        face_rgba = self._create_face_mask_from_reconstruction(image_rgb, reconstruction_result)
-        mask_path = save_face_mask_png(face_rgba, photo_dir / "face_mask.png")
+        # Save face mask (424x500 letterboxed RGBA crop with skin alpha mask) + face_crop.jpg + thumb.jpg
+        mask_path, crop_path, thumb_path = self._save_face_assets(image_bgr, reconstruction_result, photo_dir)
 
         # Save full reconstruction to pickle
         reconstruction_dict = self._reconstruction_to_dict(reconstruction_result)
         reconstruction_path = save_pickle(reconstruction_dict, photo_dir / "reconstruction.pkl")
+
+        # Save UV texture + confidence map
+        uv_paths = self._save_uv_assets(image_bgr, reconstruction_dict, photo_dir)
+
+        # Save 3D mesh (OBJ + MTL)
+        mesh_paths = self._save_mesh_assets(reconstruction_dict, photo_dir)
 
         # Extract pose from 3DDFA (not from filename!)
         angles_deg = reconstruction_result.angles_deg
@@ -145,6 +191,180 @@ class ExtractionEngine:
         )
         save_json(record.model_dump(), photo_dir / "info.json")
         return record
+
+    def _save_face_assets(self, image_bgr: np.ndarray, recon, photo_dir: Path) -> tuple[Path, Path, Path]:
+        """Сохраняет face_mask.png (424x500 RGBA letterbox crop), face_crop.jpg, thumb.jpg."""
+        seg_visible = recon.payload.get("seg_visible")
+        trans_params = recon.payload.get("trans_params")
+        h, w = image_bgr.shape[:2]
+
+        # Build skin alpha mask from 3DDFA segmentation
+        mask = None
+        if seg_visible is not None:
+            # seg channels: [right_eye, left_eye, right_eyebrow, left_eyebrow, nose, up_lip, down_lip, skin]
+            skin_224 = np.maximum(seg_visible[7], seg_visible[4]).copy()  # skin + nose
+            if seg_visible.shape[0] > 6:
+                excluded_224 = np.maximum.reduce([
+                    seg_visible[0], seg_visible[1], seg_visible[2], seg_visible[3],
+                    seg_visible[5], seg_visible[6],
+                ])
+                exclusion_weight = 1.0 / (1.0 + np.exp(-10 * (excluded_224 - 0.5)))
+                skin_224 *= (1.0 - exclusion_weight)
+            skin_224_uint8 = np.clip(skin_224 * 255, 0, 255).astype(np.uint8)
+
+            # Project from 224x224 to original image
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "core" / "3ddfa_v3"))
+                from util.io import back_resize_crop_img
+                from PIL import Image as PILImage
+                mask_rgb = np.stack((skin_224_uint8, skin_224_uint8, skin_224_uint8), axis=-1)
+                blank = np.zeros((h, w, 3), dtype=np.uint8)
+                full_mask_rgb = back_resize_crop_img(mask_rgb, trans_params, blank, resample_method=PILImage.BILINEAR)
+                mask = full_mask_rgb[:, :, 0]
+            except Exception:
+                mask = cv2.resize(skin_224_uint8, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        if mask is None:
+            # Fallback: oval from landmarks
+            landmarks = recon.landmarks_106
+            if landmarks is not None and len(landmarks) > 0:
+                x_min, y_min = landmarks[:, 0].min(), landmarks[:, 1].min()
+                x_max, y_max = landmarks[:, 0].max(), landmarks[:, 1].max()
+                bbox = (int(x_min), int(y_min), int(x_max - x_min), int(y_max - y_min))
+                bbox = expand_bbox(clamp_bbox(bbox, image_bgr.shape), image_bgr.shape, margin=0.15)
+                _, face_rgba = create_face_mask_rgba(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), bbox)
+                mask = face_rgba[:, :, 3]
+            else:
+                mask = np.zeros((h, w), dtype=np.uint8)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        # Find bounding box of mask
+        coords = cv2.findNonZero((mask > 10).astype(np.uint8))
+        if coords is None:
+            mask_path = save_face_mask_png(np.dstack([cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), np.zeros((h, w), dtype=np.uint8)]), photo_dir / FACE_MASK_FILENAME)
+            return mask_path, Path(""), Path("")
+
+        x, y, bw, bh = cv2.boundingRect(coords)
+        target_aspect = FACE_CROP_WIDTH / FACE_CROP_HEIGHT
+        crop_w = int(max(bw * 1.25, bh * 1.25 * target_aspect, 1))
+        crop_h = int(max(bh * 1.25, crop_w / target_aspect, 1))
+        cx = x + bw / 2.0
+        cy = y + bh / 2.0
+        x1 = int(round(cx - crop_w / 2.0))
+        y1 = int(round(cy - crop_h / 2.0))
+        x2 = x1 + crop_w
+        y2 = y1 + crop_h
+        if x1 < 0:
+            x2 -= x1
+            x1 = 0
+        if y1 < 0:
+            y2 -= y1
+            y1 = 0
+        if x2 > w:
+            x1 = max(0, x1 - (x2 - w))
+            x2 = w
+        if y2 > h:
+            y1 = max(0, y1 - (y2 - h))
+            y2 = h
+
+        face_crop_bgr = image_bgr[y1:y2, x1:x2].copy()
+        face_crop_mask = mask[y1:y2, x1:x2]
+        face_crop_bgr = _resize_letterbox(face_crop_bgr, FACE_CROP_WIDTH, FACE_CROP_HEIGHT)
+        face_crop_mask = _resize_letterbox_gray(face_crop_mask, FACE_CROP_WIDTH, FACE_CROP_HEIGHT)
+
+        # Save face_mask.png (RGBA)
+        face_crop_rgba = cv2.cvtColor(face_crop_bgr, cv2.COLOR_BGR2BGRA)
+        face_crop_rgba[:, :, 3] = face_crop_mask
+        mask_path = photo_dir / FACE_MASK_FILENAME
+        cv2.imwrite(str(mask_path), face_crop_rgba)
+
+        # Save face_crop.jpg (BGR preview)
+        crop_path = photo_dir / FACE_CROP_FILENAME
+        cv2.imwrite(str(crop_path), face_crop_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+        # Save thumb.jpg (100x100)
+        thumb_path = photo_dir / THUMB_FILENAME
+        thumb = cv2.resize(face_crop_bgr, (100, 100), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(str(thumb_path), thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+
+        return mask_path, crop_path, thumb_path
+
+    def _save_uv_assets(self, image_bgr: np.ndarray, recon_dict: dict, photo_dir: Path) -> dict[str, Path]:
+        """Сохраняет uv_texture.png и uv_confidence.png, если доступен UV-модуль."""
+        paths = {}
+        try:
+            core_repo = Path(__file__).resolve().parents[2] / "core"
+            sys.path.insert(0, str(core_repo))
+            from uv_module.hd_uv_generator import HDUVConfig, HDUVTextureGenerator
+
+            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+            uv_gen = HDUVTextureGenerator(HDUVConfig(uv_size=768))
+            uv_tex_analysis, uv_tex_beauty, uv_mask_visible, uv_confidence, aux = uv_gen.generate(image_rgb, recon_dict)
+
+            # Save UV texture (use beauty version for preview)
+            uv_tex_path = photo_dir / UV_TEXTURE_FILENAME
+            # uv_tex_beauty is uint8, need to save as RGB PNG
+            from PIL import Image as PILImage
+            PILImage.fromarray(uv_tex_beauty.astype(np.uint8), mode="RGB").save(str(uv_tex_path))
+            paths["uv_texture"] = uv_tex_path
+
+            # Save UV confidence
+            uv_conf_path = photo_dir / UV_CONFIDENCE_FILENAME
+            conf_uint8 = np.clip(uv_confidence * 255, 0, 255).astype(np.uint8)
+            PILImage.fromarray(conf_uint8, mode="L").save(str(uv_conf_path))
+            paths["uv_confidence"] = uv_conf_path
+        except Exception as exc:
+            logger.warning("UV texture generation not available: %s", exc)
+        return paths
+
+    def _save_mesh_assets(self, recon_dict: dict, photo_dir: Path) -> dict[str, Path]:
+        """Сохраняет mesh.obj и mesh.mtl из 3DDFA-реконструкции."""
+        paths = {}
+        try:
+            vertices = np.asarray(recon_dict.get("vertices", []), dtype=np.float32)
+            triangles = np.asarray(recon_dict.get("triangles", []), dtype=np.int32)
+            normals = np.asarray(recon_dict.get("normals", []), dtype=np.float32)
+            if len(vertices) == 0 or len(triangles) == 0:
+                return paths
+
+            # Write MTL file
+            mtl_path = photo_dir / MESH_MTL_FILENAME
+            mtl_content = f"""# DEEPUTIN 3DDFA-V3 mesh
+newmtl face_material
+Ka 0.2 0.2 0.2
+Kd 0.8 0.8 0.8
+Ks 0.0 0.0 0.0
+d 1.0
+illum 2
+map_Kd {UV_TEXTURE_FILENAME}
+"""
+            mtl_path.write_text(mtl_content)
+            paths["mesh_mtl"] = mtl_path
+
+            # Write OBJ file
+            obj_path = photo_dir / MESH_OBJ_FILENAME
+            lines = [f"mtllib {MESH_MTL_FILENAME}\n"]
+            # Vertices
+            for v in vertices:
+                lines.append(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
+            # Texture coordinates (placeholder)
+            for v in vertices:
+                lines.append(f"vt 0.0 0.0\n")
+            # Normals
+            for n in normals:
+                lines.append(f"vn {n[0]:.6f} {n[1]:.6f} {n[2]:.6f}\n")
+            # Faces
+            lines.append("usemtl face_material\n")
+            for t in triangles:
+                lines.append(f"f {t[0]+1}/{t[0]+1}/{t[0]+1} {t[1]+1}/{t[1]+1}/{t[1]+1} {t[2]+1}/{t[2]+1}/{t[2]+1}\n")
+            obj_path.write_text("".join(lines))
+            paths["mesh_obj"] = obj_path
+
+        except Exception as exc:
+            logger.warning("Mesh export error: %s", exc)
+        return paths
 
     def _create_face_mask_from_reconstruction(self, image_rgb: np.ndarray, recon) -> np.ndarray:
         """Create face mask from 3DDFA segmentation (seg_visible) or fallback to landmarks bbox."""

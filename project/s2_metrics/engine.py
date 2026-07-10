@@ -130,7 +130,9 @@ class MetricsEngine:
         physical_features = {}
         try:
             landmarks_68 = reconstruction.get("landmarks_68")
-            if landmarks_68 is not None and rgba is not None:
+            if (not landmarks_68 or len(landmarks_68) == 0):
+                landmarks_68 = reconstruction.get("landmarks_106")
+            if landmarks_68 is not None and len(landmarks_68) > 0 and rgba is not None:
                 landmarks = np.array(landmarks_68, dtype=np.float32)
                 if landmarks.ndim == 2 and landmarks.shape[1] >= 2:
                     image_rgb = rgba[:, :, :3]
@@ -144,11 +146,14 @@ class MetricsEngine:
                         "spectral_slope": pf.spectral_slope,
                         "hemoglobin_index": pf.hemoglobin_index,
                         "seam_score": pf.seam_score,
+                        "wrinkle_anisotropy": pf.wrinkle_anisotropy,
+                        "wrinkle_dominant_angle": pf.wrinkle_dominant_angle,
                     }
         except Exception:
             pass
 
         # Добавляем флаг фильтрации
+        texture_weights_json = texture.pop("texture_feature_weights_json", None)
         metric_notes = {
             "geometry_space": "3ddfa_v3_canonical",
             "texture_source": "face_mask.png",
@@ -158,6 +163,8 @@ class MetricsEngine:
             "texture_catalog_size": str(len(self.texture_catalog)),
             "quality_sensitive_excluded": str(self.texture_extractor._quality_sensitive_excluded),
         }
+        if texture_weights_json:
+            metric_notes["texture_feature_weights_json"] = texture_weights_json
         for k, v in physical_features.items():
             metric_notes[f"physical_{k}"] = str(v)
         if self.texture_extractor._quality_sensitive_excluded:

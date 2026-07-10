@@ -119,7 +119,7 @@ class PhysicalTextureExtractor:
     def _get_ear_roi(self, landmarks: np.ndarray, img_shape: Tuple) -> np.ndarray:
         """ROI мочки уха (точки 0-16 для профиля, ищем самую левую/правую точку)."""
         h, w = img_shape[:2]
-        mask = np.zeros((h, w), dtype=bool)
+        mask = np.zeros((h, w), dtype=np.uint8)
         # Упрощенно: область вокруг лобуля уха
         leftmost = landmarks[:, 0].min()
         rightmost = landmarks[:, 0].max()
@@ -127,47 +127,47 @@ class PhysicalTextureExtractor:
         if rightmost - leftmost > 0:
             ear_x = int(rightmost + (rightmost - leftmost) * 0.15)
             ear_y = int(landmarks[8, 1])  # подбородок как ориентир
-            cv2.ellipse(mask, (ear_x, ear_y), (30, 40), 0, 0, 360, True, -1)
-        return mask
+            cv2.ellipse(mask, (ear_x, ear_y), (30, 40), 0, 0, 360, 255, -1)
+        return mask > 0
     
     def _get_cheek_roi(self, landmarks: np.ndarray, img_shape: Tuple) -> np.ndarray:
         """ROI щеки (между глазом и углом рта)."""
         h, w = img_shape[:2]
-        mask = np.zeros((h, w), dtype=bool)
+        mask = np.zeros((h, w), dtype=np.uint8)
         # Точки щеки: примерно 1-5 и 11-15
         cheek_pts = np.vstack([landmarks[1:6], landmarks[11:16]])
         if len(cheek_pts) > 3:
-            cv2.fillPoly(mask, [cheek_pts.astype(np.int32)], True)
-        return mask
+            cv2.fillPoly(mask, [cheek_pts.astype(np.int32)], 255)
+        return mask > 0
     
     def _get_forehead_roi(self, landmarks: np.ndarray, img_shape: Tuple) -> np.ndarray:
         """ROI лба (над бровями)."""
         h, w = img_shape[:2]
-        mask = np.zeros((h, w), dtype=bool)
+        mask = np.zeros((h, w), dtype=np.uint8)
         # Брови: точки 17-26
         brow_y = landmarks[17:27, 1].min()
         forehead_top = max(0, int(brow_y - (landmarks[8, 1] - brow_y) * 0.5))
         cv2.rectangle(mask, (int(landmarks[:,0].min()), forehead_top), 
-                      (int(landmarks[:,0].max()), int(brow_y)), True, -1)
-        return mask
+                      (int(landmarks[:,0].max()), int(brow_y)), 255, -1)
+        return mask > 0
     
     def _get_nose_roi(self, landmarks: np.ndarray, img_shape: Tuple) -> np.ndarray:
         """ROI носа (для бликов)."""
         h, w = img_shape[:2]
-        mask = np.zeros((h, w), dtype=bool)
+        mask = np.zeros((h, w), dtype=np.uint8)
         nose_pts = landmarks[27:36]
         if len(nose_pts) > 3:
-            cv2.fillPoly(mask, [nose_pts.astype(np.int32)], True)
-        return mask
+            cv2.fillPoly(mask, [nose_pts.astype(np.int32)], 255)
+        return mask > 0
     
     def _get_chin_roi(self, landmarks: np.ndarray, img_shape: Tuple) -> np.ndarray:
         """ROI подбородка."""
         h, w = img_shape[:2]
-        mask = np.zeros((h, w), dtype=bool)
+        mask = np.zeros((h, w), dtype=np.uint8)
         chin_pts = landmarks[6:11]
         if len(chin_pts) > 3:
-            cv2.fillPoly(mask, [chin_pts.astype(np.int32)], True)
-        return mask
+            cv2.fillPoly(mask, [chin_pts.astype(np.int32)], 255)
+        return mask > 0
 
     def _compute_mm_per_pixel(self, landmarks: np.ndarray) -> float:
         """

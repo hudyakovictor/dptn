@@ -220,6 +220,7 @@ class VerdictEngine:
             + phys.get("seam_score", 0.0) * 0.25
             + phys.get("spectral_slope", 0.0) * 0.15
             + phys.get("lbp_nonuniform_ratio", 0.0) * 0.10
+            + phys.get("wrinkle_anisotropy", 0.0) * 0.10
         )
 
         priors = {
