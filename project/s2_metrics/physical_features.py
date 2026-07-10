@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 @dataclass
 class PhysicalTextureFeatures:
-    """Результат извлечения 7 физических признаков силикона."""
+    """Результат извлечения физических признаков силикона."""
     sss_index: float           # Subsurface scattering (R-B diff на ухе vs щеке)
     specular_sharpness: float  # Резкость бликов (σ градиента на периметре)
     pore_periodicity: float    # Энтропия углового спектра пор
@@ -20,6 +20,8 @@ class PhysicalTextureFeatures:
     spectral_slope: float      # β в 1/f^β
     hemoglobin_index: float    # a* в CIELAB на щеке
     seam_score: float          # Резкий скачок текстуры на границе лица
+    wrinkle_anisotropy: float = 0.0    # Anisotropy ratio ( доминирующая ориентация / uniform )
+    wrinkle_dominant_angle: float = 0.0 # Доминирующий угол морщин (0-180°)
 
 
 class PhysicalTextureExtractor:
@@ -65,7 +67,10 @@ class PhysicalTextureExtractor:
         forehead_roi = self._get_forehead_roi(landmarks, image.shape[:2])
         nose_roi = self._get_nose_roi(landmarks, image.shape[:2])
         chin_roi = self._get_chin_roi(landmarks, image.shape[:2])
-        
+
+        # Масштаб мм/пиксель
+        mm_per_pixel = self._compute_mm_per_pixel(landmarks)
+
         # 1. Subsurface Scattering (SSS)
         sss_index = self._compute_sss(albedo, ear_roi, cheek_roi, skin_mask)
         
@@ -73,13 +78,13 @@ class PhysicalTextureExtractor:
         specular_sharpness = self._compute_specular_sharpness(albedo, forehead_roi, nose_roi, skin_mask)
         
         # 3. Pore periodicity
-        pore_periodicity = self._compute_pore_periodicity(gray, cheek_roi, forehead_roi, skin_mask)
+        pore_periodicity = self._compute_pore_periodicity(gray, cheek_roi, forehead_roi, skin_mask, mm_per_pixel)
         
         # 4. LBP non-uniform ratio
         lbp_ratio = self._compute_lbp_nonuniform(gray, cheek_roi, forehead_roi, skin_mask)
         
         # 5. Spectral slope
-        spectral_slope = self._compute_spectral_slope(gray, cheek_roi, forehead_roi, skin_mask)
+        spectral_slope = self._compute_spectral_slope(gray, cheek_roi, forehead_roi, skin_mask, mm_per_pixel)
         
         # 6. Hemoglobin index
         hemoglobin_index = self._compute_hemoglobin_index(albedo, cheek_roi, skin_mask)
@@ -87,6 +92,11 @@ class PhysicalTextureExtractor:
         # 7. Seam score
         seam_score = self._compute_seam_score(gray, landmarks, skin_mask)
         
+        # 8. Wrinkle anisotropy (Langer's lines)
+        wrinkle_anisotropy, wrinkle_dominant_angle = self._compute_wrinkle_anisotropy(
+            gray, skin_mask, forehead_roi, cheek_roi
+        )
+
         return PhysicalTextureFeatures(
             sss_index=sss_index,
             specular_sharpness=specular_sharpness,
@@ -95,6 +105,8 @@ class PhysicalTextureExtractor:
             spectral_slope=spectral_slope,
             hemoglobin_index=hemoglobin_index,
             seam_score=seam_score,
+            wrinkle_anisotropy=wrinkle_anisotropy,
+            wrinkle_dominant_angle=wrinkle_dominant_angle,
         )
     
     def _normalize_illumination(self, image: np.ndarray) -> np.ndarray:
@@ -156,7 +168,30 @@ class PhysicalTextureExtractor:
         if len(chin_pts) > 3:
             cv2.fillPoly(mask, [chin_pts.astype(np.int32)], True)
         return mask
-    
+
+    def _compute_mm_per_pixel(self, landmarks: np.ndarray) -> float:
+        """
+        Оценка масштаба мм/пиксель через interpupillary distance.
+        Среднее расстояние между зрачками взрослого человека: ~63 мм.
+        landmarks[36] = left eye outer corner, landmarks[45] = right eye outer corner.
+        """
+        if self.face_scale_mm != 1.0:
+            return self.face_scale_mm
+        try:
+            # Interpupillary distance (approximate by eye corners)
+            left_eye = landmarks[36]
+            right_eye = landmarks[45]
+            ipd_pixels = np.sqrt(
+                (right_eye[0] - left_eye[0])**2 + (right_eye[1] - left_eye[1])**2
+            )
+            if ipd_pixels < 10:
+                return 1.0  # fallback
+            # Reference IPD: ~63mm for adult
+            mm_per_pixel = 63.0 / ipd_pixels
+            return float(np.clip(mm_per_pixel, 0.05, 2.0))  # sanity check
+        except Exception:
+            return 1.0
+
     def _compute_sss(self, albedo: np.ndarray, ear_roi: np.ndarray, 
                      cheek_roi: np.ndarray, skin_mask: np.ndarray) -> float:
         """
@@ -217,10 +252,12 @@ class PhysicalTextureExtractor:
         return 0.0
     
     def _compute_pore_periodicity(self, gray: np.ndarray, cheek_roi: np.ndarray,
-                                   forehead_roi: np.ndarray, skin_mask: np.ndarray) -> float:
+                                   forehead_roi: np.ndarray, skin_mask: np.ndarray,
+                                   mm_per_pixel: float = 1.0) -> float:
         """
         Периодичность пор: штамповка дает регулярные пики в полярном спектре.
         Энтропия по угловой координате: низкая = регулярный рисунок.
+        mm_per_pixel используется для конвертации frequency bins → cycles/mm.
         """
         combined_roi = (cheek_roi | forehead_roi) & skin_mask
         if combined_roi.sum() < 1000:
@@ -252,14 +289,20 @@ class PhysicalTextureExtractor:
         y_grid, x_grid = np.ogrid[:64, :64]
         theta = np.arctan2(y_grid - center[0], x_grid - center[1]) + np.pi  # 0..2π
         radius = np.sqrt((y_grid - center[0])**2 + (x_grid - center[1])**2)
-        
+
+        # Конвертация радиуса в cycles/mm
+        # patch_size = 64 pixels, total field of view = 64 * mm_per_pixel mm
+        # frequency_resolution = 1 / (64 * mm_per_pixel) cycles/mm per pixel
+        freq_res = 1.0 / (64.0 * mm_per_pixel + 1e-6)
+        radius_mm = radius * freq_res  # now in cycles/mm
+
         # Биннинг по углу (36 бинов по 10°)
         n_bins = 36
         angular_profile = np.zeros(n_bins)
         for i in range(n_bins):
             angle_mask = (theta >= i * 2*np.pi/n_bins) & (theta < (i+1) * 2*np.pi/n_bins)
-            # Только средние частоты (радиус 5-20)
-            freq_mask = (radius >= 5) & (radius <= 20)
+            # Средние частоты: 0.05-0.3 cycles/mm (поры ~3-20 мм^-1)
+            freq_mask = (radius_mm >= 0.05) & (radius_mm <= 0.3)
             combined = angle_mask & freq_mask
             if combined.any():
                 angular_profile[i] = magnitude[combined].mean()
@@ -305,11 +348,13 @@ class PhysicalTextureExtractor:
         return float(np.mean(nonuniform_ratios)) if nonuniform_ratios else 0.5
     
     def _compute_spectral_slope(self, gray: np.ndarray, cheek_roi: np.ndarray,
-                                 forehead_roi: np.ndarray, skin_mask: np.ndarray) -> float:
+                                 forehead_roi: np.ndarray, skin_mask: np.ndarray,
+                                 mm_per_pixel: float = 1.0) -> float:
         """
         Спектральный наклон β в 1/f^β.
         Реальная кожа: β≈2.2-2.6.
         Силикон: β>2.8 (слишком гладко) или β<1.8 с пиками (штамповка).
+        mm_per_pixel используется для конвертации frequency → cycles/mm.
         """
         combined_roi = (cheek_roi | forehead_roi) & skin_mask
         ys, xs = np.where(combined_roi)
@@ -330,26 +375,30 @@ class PhysicalTextureExtractor:
         center = (32, 32)
         y_grid, x_grid = np.ogrid[:64, :64]
         radius = np.sqrt((y_grid - center[0])**2 + (x_grid - center[1])**2)
-        
-        max_r = 32
+
+        # Конвертация в cycles/mm
+        freq_res = 1.0 / (64.0 * mm_per_pixel + 1e-6)
+        radius_mm = radius * freq_res
+
+        max_r_mm = 32.0 * freq_res  # maximum frequency in cycles/mm
         n_bins = 20
         radial_power = np.zeros(n_bins)
         radial_counts = np.zeros(n_bins)
         
         for i in range(n_bins):
-            r1 = i * max_r / n_bins
-            r2 = (i + 1) * max_r / n_bins
-            mask = (radius >= r1) & (radius < r2)
+            r1 = i * max_r_mm / n_bins
+            r2 = (i + 1) * max_r_mm / n_bins
+            mask = (radius_mm >= r1) & (radius_mm < r2)
             if mask.any():
                 radial_power[i] = power[mask].mean()
                 radial_counts[i] = mask.sum()
         
-        # Fit log-log linear regression for r > 2
-        valid = (radial_counts > 0) & (np.arange(n_bins) * max_r / n_bins > 2)
+        # Fit log-log linear regression for r > 2 bins (skip DC and very low freq)
+        valid = (radial_counts > 0) & (np.arange(n_bins) >= 2)
         if valid.sum() < 4:
             return 2.5
         
-        log_r = np.log(np.arange(n_bins)[valid] * max_r / n_bins)
+        log_r = np.log(np.arange(n_bins)[valid] * max_r_mm / n_bins + 1e-6)
         log_p = np.log(radial_power[valid] + 1e-6)
         
         slope, _ = np.polyfit(log_r, log_p, 1)
@@ -395,3 +444,72 @@ class PhysicalTextureExtractor:
         seam = abs(mean_inside - mean_outside) / 255.0
         
         return float(np.clip(seam, 0.0, 1.0))
+
+    def _compute_wrinkle_anisotropy(
+        self,
+        gray: np.ndarray,
+        skin_mask: np.ndarray,
+        forehead_roi: np.ndarray,
+        cheek_roi: np.ndarray,
+    ) -> Tuple[float, float]:
+        """
+        Anisotropy wrinkle direction (Langer's lines).
+        Computes gradient orientation histogram within skin regions.
+        Returns (anisotropy_ratio, dominant_angle).
+        - anisotropy_ratio: 1.0 = uniform, >1.0 = anisotropic (dominant direction)
+        - dominant_angle: 0-180 degrees (wrinkle direction)
+        """
+        try:
+            # Combine forehead and cheek ROIs for wrinkle analysis
+            analysis_mask = (forehead_roi | cheek_roi) & skin_mask.astype(bool)
+            if analysis_mask.sum() < 500:
+                return 0.0, 0.0
+
+            # Extract region of interest
+            coords = np.argwhere(analysis_mask)
+            y0, x0 = coords.min(axis=0)
+            y1, x1 = coords.max(axis=0) + 1
+            roi = gray[y0:y1, x0:x1].astype(np.float64)
+            roi_mask = analysis_mask[y0:y1, x0:x1]
+
+            # Sobel gradients
+            sobel_x = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=3)
+            sobel_y = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=3)
+
+            # Gradient orientation (0-180 degrees, undirected)
+            angles = np.arctan2(sobel_y, sobel_x)  # -pi to pi
+            angles_deg = np.degrees(angles) % 180  # 0-180 degrees
+
+            # Weight by gradient magnitude (stronger edges = more reliable orientation)
+            magnitudes = np.sqrt(sobel_x**2 + sobel_y**2)
+
+            # Only use skin pixels with sufficient gradient
+            valid = roi_mask & (magnitudes > 5.0)
+            if valid.sum() < 100:
+                return 0.0, 0.0
+
+            angles_valid = angles_deg[valid]
+            mag_valid = magnitudes[valid]
+
+            # Build weighted histogram (18 bins = 10 degrees each)
+            n_bins = 18
+            hist, bin_edges = np.histogram(
+                angles_valid, bins=n_bins, range=(0, 180), weights=mag_valid
+            )
+
+            # Normalize
+            hist = hist / (hist.sum() + 1e-6)
+
+            # Anisotropy ratio: max(bin) / mean(bin)
+            # 1.0 = perfectly uniform, higher = more anisotropic
+            mean_hist = hist.mean()
+            anisotropy = float(hist.max() / (mean_hist + 1e-6))
+
+            # Dominant angle: center of the tallest bin
+            dominant_bin = int(np.argmax(hist))
+            dominant_angle = float(bin_edges[dominant_bin] + 5.0)  # center of 10-degree bin
+
+            return float(np.clip(anisotropy, 0.0, 10.0)), float(dominant_angle % 180)
+
+        except Exception:
+            return 0.0, 0.0

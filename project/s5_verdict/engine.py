@@ -13,38 +13,9 @@ from .biological_limits import BiologicalConstraintChecker
 from .alpha_tracker import AlphaStabilityTracker
 from .baseline_return import BaselineReturnDetector
 from .h1_engine import H1SyntheticDetector
+from .calibration_analysis import FittedPlattCalibrator, compute_ece_mce
 
 logger = setup_logger("deeputin.s5")
-
-
-class _PlattCalibrator:
-    """Platt-like calibration: sigmoid на posteriors до нормировки.
-    Пока нет калибровочного датасета — используются параметры по умолчанию
-    (умеренное сжатие к 0.5 при низком качестве, растяжение при высоком).
-    """
-
-    def __init__(self):
-        # a, b для sigmoid: calibrated = 1 / (1 + exp(a * raw + b))
-        # По умолчанию: a=-1.0, b=1.0 → умеренная калибровка
-        self.params: dict[str, tuple[float, float]] = {}
-
-    def calibrate(self, posterior: dict[str, float], quality: float) -> dict[str, float]:
-        """Калибрует posterior с учётом качества фото."""
-        # При низком качестве — сжимаем к 0.25 (равномерное)
-        # При высоком — растягаем к оригиналу
-        calibrated = {}
-        for key, prob in posterior.items():
-            # Platt-like: a * logit(prob) + b
-            prob_clipped = np.clip(prob, 1e-6, 1 - 1e-6)
-            logit = np.log(prob_clipped / (1 - prob_clipped))
-            # Масштаб зависит от качества
-            scale = 0.5 + 0.5 * quality  # 0.5..1.0
-            calibrated_logit = logit * scale
-            calibrated_prob = 1.0 / (1.0 + np.exp(-calibrated_logit))
-            calibrated[key] = float(calibrated_prob)
-        # Нормировка
-        total = sum(calibrated.values()) or 1.0
-        return {k: v / total for k, v in calibrated.items()}
 
 
 class VerdictEngine:
@@ -54,7 +25,7 @@ class VerdictEngine:
         self.alpha_tracker = AlphaStabilityTracker()
         self.baseline_detector = BaselineReturnDetector()
         self.h1_detector = H1SyntheticDetector()
-        self._calibrator = _PlattCalibrator()
+        self._calibrator = FittedPlattCalibrator()
 
     def build_verdicts(self, main_root: str | Path) -> tuple[list[Stage5Record], list[dict[str, object]]]:
         root = Path(main_root)
@@ -125,6 +96,30 @@ class VerdictEngine:
 
         save_json([v.model_dump() for v in verdicts], root / "verdicts.json")
         save_json(timeline, root / "timeline.json")
+        
+        # Calibration report
+        if verdicts:
+            y_true = np.array([1 if v.hypothesis.value == "H0_SAME" else 0 for v in verdicts])
+            y_prob = np.array([v.posterior.get("H0_SAME", 0.5) for v in verdicts])
+            if len(np.unique(y_true)) > 1:
+                cal_metrics = compute_ece_mce(y_true, y_prob, n_bins=5)
+                save_json({
+                    "ece": cal_metrics.ece,
+                    "mce": cal_metrics.mce,
+                    "n_bins": cal_metrics.n_bins,
+                    "total_samples": cal_metrics.total_samples,
+                    "bins": [
+                        {
+                            "bin_lower": b.bin_lower,
+                            "bin_upper": b.bin_upper,
+                            "mean_predicted": b.mean_predicted,
+                            "mean_observed": b.mean_observed,
+                            "count": b.count,
+                        }
+                        for b in cal_metrics.bins
+                    ],
+                }, root / "calibration_report.json")
+        
         return verdicts, timeline
 
     def _load_pair_index(self, root: Path) -> dict[str, list[PairEvidence]]:
