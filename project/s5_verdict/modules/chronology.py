@@ -127,6 +127,9 @@ class ChronologyAnalyzer:
         # Change point detection (ruptures Pelt)
         self._detect_change_points(points, per_metric_series, per_photo_scores, per_photo_flags)
 
+        # Cross-metric return-to-baseline: если geometry + texture одновременно вернулись
+        self._detect_cross_metric_return(points, per_metric_series, per_photo_scores, per_photo_flags)
+
         for point in points:
             point.chronology_score = float(np.clip(per_photo_scores[point.photo_id], 0.0, 3.0))
             point.flags = sorted(per_photo_flags[point.photo_id])
@@ -355,6 +358,56 @@ class ChronologyAnalyzer:
                 if delta > 0.3:  # значимый сдвиг
                     per_photo_flags[photo_id].add(f"structural_break:{mname}")
 
+    def _detect_cross_metric_return(
+        self,
+        points: list[ChronologyPoint],
+        per_metric_series: dict[str, list[float]],
+        per_photo_scores: dict[str, float],
+        per_photo_flags: dict[str, Set[str]],
+    ):
+        """Cross-metric return-to-baseline: если geometry + texture одновременно
+        вернулись к baseline — это сильный сигнал (маска снята, двойник вернулся).
+        """
+        if len(points) < 5:
+            return
+
+        # Группируем метрики по типам
+        geom_metrics = {k: v for k, v in per_metric_series.items() if k.startswith("bone_") or k.startswith("mesh_")}
+        tex_metrics = {k: v for k, v in per_metric_series.items() if k.startswith("texture_") or k.startswith("glcm_") or k.startswith("lbp_")}
+
+        if not geom_metrics or not tex_metrics:
+            return
+
+        # Для каждой пары (geometry, texture) проверяем одновременный возврат
+        for g_name, g_vals in geom_metrics.items():
+            for t_name, t_vals in tex_metrics.items():
+                min_len = min(len(g_vals), len(t_vals))
+                if min_len < 5:
+                    continue
+
+                g_arr = np.array(g_vals[:min_len], dtype=float)
+                t_arr = np.array(t_vals[:min_len], dtype=float)
+
+                # Нормализация
+                g_mu, g_sigma = np.median(g_arr), np.std(g_arr) + 1e-6
+                t_mu, t_sigma = np.median(t_arr), np.std(t_arr) + 1e-6
+                g_norm = (g_arr - g_mu) / g_sigma
+                t_norm = (t_arr - t_mu) / t_sigma
+
+                # Ищем окно (3 фото), где обе метрики отклоняются > 1.0, а затем возвращаются < 0.3
+                for idx in range(2, min_len - 1):
+                    # Проверяем: было отклонение на idx-2..idx-1
+                    g_was偏离 = np.mean(np.abs(g_norm[idx-2:idx])) > 1.0
+                    t_was偏离 = np.mean(np.abs(t_norm[idx-2:idx])) > 1.0
+                    # Проверяем: вернулось к baseline на idx
+                    g_returned = abs(g_norm[idx]) < 0.3
+                    t_returned = abs(t_norm[idx]) < 0.3
+
+                    if g_was偏离 and t_was偏离 and g_returned and t_returned:
+                        photo_id = points[idx].photo_id
+                        per_photo_scores[photo_id] += 0.7
+                        per_photo_flags[photo_id].add(f"CROSS_RETURN:{g_name}+{t_name}")
+
     def _summary_flags(self, points: list[ChronologyPoint]) -> list[str]:
         if not points:
             return []
@@ -370,4 +423,6 @@ class ChronologyAnalyzer:
             flags.append("mask_swap_indicator")
         if any("change_point_detected" in flag for p in points for flag in p.flags):
             flags.append("structural_break_detected")
+        if any("CROSS_RETURN:" in flag for p in points for flag in p.flags):
+            flags.append("cross_metric_return_detected")
         return flags

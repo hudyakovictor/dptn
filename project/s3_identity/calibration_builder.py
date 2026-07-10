@@ -62,6 +62,8 @@ class PoseAwareCalibrationBuilder:
                 scale_a = a.get("face_scale", 1.0)
                 scale_b = b.get("face_scale", 1.0)
                 scale_diff = abs(scale_a - scale_b)
+                # Per-metric distances для TheilSen regression
+                per_metric = self._per_metric_distances(a, b)
                 pairs.append(CalibrationPair(
                     pose_gap=pose_gap,
                     geom_dist=geom_dist,
@@ -69,8 +71,24 @@ class PoseAwareCalibrationBuilder:
                     quality=quality,
                     age_gap=age_gap,
                     scale_diff=scale_diff,
+                    per_metric_dists=per_metric,
                 ))
         return pairs
+
+    def _per_metric_distances(self, a: Dict, b: Dict) -> Dict[str, float]:
+        """Вычисляет попарные расстояния для каждой метрики отдельно."""
+        result = {}
+        # Geometry metrics
+        geom_a = a.get("geometry", {})
+        geom_b = b.get("geometry", {})
+        for key in set(geom_a.keys()) & set(geom_b.keys()):
+            result[f"geom_{key}"] = abs(geom_a[key] - geom_b[key])
+        # Texture metrics
+        tex_a = a.get("texture", {})
+        tex_b = b.get("texture", {})
+        for key in set(tex_a.keys()) & set(tex_b.keys()):
+            result[f"tex_{key}"] = abs(tex_a[key] - tex_b[key])
+        return result
 
     def _pose_gap(self, pose_a: Dict, pose_b: Dict) -> float:
         dy = abs(pose_a.get("yaw", 0) - pose_b.get("yaw", 0))
@@ -147,25 +165,36 @@ class PoseAwareCalibrationBuilder:
         )
 
     def fit_thesensen_per_metric(
-        self, pairs: List[CalibrationPair], metric_keys: list[str]
+        self, pairs: List[CalibrationPair], metric_keys: list[str] | None = None
     ) -> dict[str, dict]:
         """TheilSen регрессия для каждой метрики отдельно.
-        Возвращает {metric: {slope, intercept, residuals_p05, residuals_p50, residuals_p95, false_anomaly_rate}}.
+        Возвращает {metric: {slope, intercept, residuals_p05, residuals_p50, residuals_p95, r2, false_anomaly_rate}}.
+        false_anomaly_rate = доля пар, где residual > p95 (ожидаемый уровень ~5%).
         """
         if len(pairs) < 10:
             return {}
+
+        # Собираем доступные метрики из per_metric_dists
+        if metric_keys is None:
+            all_keys: set[str] = set()
+            for p in pairs:
+                all_keys.update(p.per_metric_dists.keys())
+            metric_keys = sorted(all_keys)
+
+        if not metric_keys:
+            # Fallback: используем geom_dist и tex_dist
+            metric_keys = ["geometry_distance", "texture_distance"]
 
         results = {}
         gaps = np.array([p.pose_gap for p in pairs]).reshape(-1, 1)
 
         for metric in metric_keys:
-            # Извлекаем значения метрики из pairs (если есть)
-            # Пока используем geom_dist как proxy для каждой метрики
-            # В реальности нужно хранить per-metric distances в CalibrationPair
             if metric == "geometry_distance":
                 y = np.array([p.geom_dist for p in pairs])
             elif metric == "texture_distance":
                 y = np.array([p.tex_dist for p in pairs])
+            elif metric.startswith("geom_") or metric.startswith("tex_"):
+                y = np.array([p.per_metric_dists.get(metric, 0.0) for p in pairs])
             else:
                 continue
 
@@ -178,6 +207,12 @@ class PoseAwareCalibrationBuilder:
                 y_pred = reg.predict(gaps)
                 residuals = y - y_pred
 
+                # False anomaly rate: доля точек за пределами p95
+                # В идеале ~5% (если калибровка корректна)
+                p95_threshold = float(np.percentile(np.abs(residuals), 95))
+                false_positives = np.sum(np.abs(residuals) > p95_threshold)
+                false_anomaly_rate = float(false_positives / len(residuals)) if len(residuals) > 0 else 0.0
+
                 results[metric] = {
                     "slope": float(reg.coef_[0]),
                     "intercept": float(reg.intercept_),
@@ -185,6 +220,7 @@ class PoseAwareCalibrationBuilder:
                     "residuals_p50": float(np.percentile(residuals, 50)),
                     "residuals_p95": float(np.percentile(residuals, 95)),
                     "r2": float(reg.score(gaps, y)),
+                    "false_anomaly_rate": false_anomaly_rate,
                     "sample_count": len(pairs),
                 }
             except Exception:
@@ -196,7 +232,12 @@ class PoseAwareCalibrationBuilder:
 class CalibrationHealthMonitor:
     """Мониторинг здоровья калибровочных корзин."""
 
-    def check(self, models: Dict[str, PoseNoiseModel], calibration_records: List[Dict]) -> List[CalibrationBucketHealth]:
+    def check(
+        self,
+        models: Dict[str, PoseNoiseModel],
+        calibration_records: List[Dict],
+        per_metric_results: Dict[str, dict] | None = None,
+    ) -> List[CalibrationBucketHealth]:
         results = []
         for bucket, model in models.items():
             bucket_recs = [r for r in calibration_records if r.get("bucket") == bucket]
@@ -214,15 +255,44 @@ class CalibrationHealthMonitor:
             health.quality_coverage = {
                 "min": min(qualities) if qualities else 0,
                 "max": max(qualities) if qualities else 0,
-                "mean": np.mean(qualities) if qualities else 0,
+                "mean": float(np.mean(qualities)) if qualities else 0,
             }
 
+            # Residual quantile check: p95/p05 размах не должен быть слишком большим
+            residual_range = model.p95 - model.p05
+            health.residual_check = {
+                "p05": model.p05,
+                "p95": model.p95,
+                "range": residual_range,
+                "mad": model.mad,
+            }
+
+            # False anomaly rate из TheilSen per-metric results
+            if per_metric_results:
+                # Берём средний false_anomaly_rate по всем метрикам
+                rates = [
+                    v.get("false_anomaly_rate", 0.0)
+                    for v in per_metric_results.values()
+                    if isinstance(v, dict)
+                ]
+                health.false_anomaly_rate = float(np.mean(rates)) if rates else 0.0
+            else:
+                # Estimate: если p95 > 3*mad, значит калибровка нестабильна
+                health.false_anomaly_rate = 0.05 if residual_range > 3.0 * model.mad else 0.0
+
+            # Status determination
             if health.photo_count < 5:
                 health.status = "insufficient"
                 health.warnings.append(f"Only {health.photo_count} photos")
             elif model.mad > 2.0:
                 health.status = "degraded"
                 health.warnings.append(f"High MAD: {model.mad:.2f}")
+            elif health.false_anomaly_rate > 0.10:
+                health.status = "degraded"
+                health.warnings.append(f"High false anomaly rate: {health.false_anomaly_rate:.1%}")
+            elif residual_range > 5.0:
+                health.status = "warning"
+                health.warnings.append(f"Wide residual range: {residual_range:.2f}")
             else:
                 health.status = "healthy"
 
